@@ -13,12 +13,12 @@ router = APIRouter(prefix="/search", tags=["search"])
 
 # entity -> page the web shell routes a hit to
 PAGE = {
-    "item": "dashboard",
-    "product": "dashboard",
-    "customer": "dashboard",
-    "supplier": "dashboard",
+    "item": "inventory",
+    "product": "catalog",
+    "customer": "quotes",
+    "supplier": "catalog",
     "sales_order": "dashboard",
-    "production_order": "dashboard",
+    "production_order": "production",
     "task": "tasks",
     "department": "admin",
     "employee": "admin",

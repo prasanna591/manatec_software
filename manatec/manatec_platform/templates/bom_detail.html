@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="panel" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px">
+  <div>
+    <div style="font-size:14px;font-weight:700">{{ product.name }}</div>
+    <div class="small muted">{{ product.category or "—" }} · active BOM</div>
+  </div>
+  <div style="display:flex;gap:12px;align-items:center">
+    <div class="stat-chip">Buildable now <b class="{{ 'ok' if (report.buildable_now or 0) > 0 else 'bad' }}">{{ report.buildable_now if report.buildable_now is not none else 0 }}</b></div>
+    <div class="stat-chip">Limiting <b class="mono">{{ report.limiting_item or "—" }}</b></div>
+    <div class="stat-chip">Worst lead <b>{{ report.max_lead_days or "—" }} d</b></div>
+  </div>
+</div>
+
+<div class="grid2" style="grid-template-columns: 1fr 1fr">
+  <div class="panel">
+    <div class="panel-title">BOM tree</div>
+    <div class="tree">
+      <ul>
+        {% for node in tree %}
+        <li>
+          <div class="node">
+            <span class="mono small" style="min-width:140px">{{ node.code }}</span>
+            <span>{{ node.description }}</span>
+            <span class="tag accent" style="margin-left:auto">× {{ node.qty }}{% if node.scrap_pct %} +{{ node.scrap_pct }}%{% endif %}</span>
+          </div>
+          {% if node.children %}
+          <ul>
+            {% for c in node.children %}
+            <li class="sub">
+              <div class="node">
+                <span class="mono small" style="min-width:140px">{{ c.code }}</span>
+                <span>{{ c.description }}</span>
+                <span class="tag ok" style="margin-left:auto">sub-assembly × {{ c.qty }}</span>
+              </div>
+              {% if c.children %}
+              <ul>
+                {% for g in c.children %}
+                <li><div class="node">
+                  <span class="mono small" style="min-width:140px">{{ g.code }}</span>
+                  <span>{{ g.description }}</span>
+                  <span class="tag accent" style="margin-left:auto">× {{ g.qty }}</span>
+                </div></li>
+                {% endfor %}
+              </ul>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        </li>
+        {% else %}
+        <div class="empty-state">No BOM lines for this product</div>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Flat (exploded) material + availability</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Code</th><th>Description</th><th class="num">Qty/unit</th>
+          <th class="num">On hand</th><th class="num">Avail</th>
+        </tr></thead>
+        <tbody>
+          {% for r in item_rows %}
+          <tr class="{{ 'row-short' if r.available < r.qty_per_unit }}">
+            <td class="mono">{{ r.item.code }}</td>
+            <td>{{ r.item.description }}</td>
+            <td class="num">{{ "%.3f"|format(r.qty_per_unit) }}</td>
+            <td class="num">{{ r.on_hand }}</td>
+            <td class="num"><b class="{{ 'ok' if r.available >= r.qty_per_unit else 'bad' }}">{{ r.available }}</b></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

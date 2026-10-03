@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="toolbar">
+  <span class="count-hint">{{ items|length }} items in the item master</span>
+</div>
+<div class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Code</th><th>Description</th><th>Category</th><th>Source</th>
+        <th class="num">Lead (d)</th><th>Supplier</th>
+        <th class="num">On hand</th><th class="num">In transit</th><th class="num">Committed</th><th>Status</th>
+      </tr></thead>
+      <tbody>
+        {% for v in items %}
+        <tr>
+          <td class="mono">{{ v.item.code }}</td>
+          <td>{{ v.item.description }}</td>
+          <td class="small">{{ v.item.category or "—" }}</td>
+          <td><span class="tag dim">{{ v.item.source_class or "medium" }}</span></td>
+          <td class="num">{{ v.item.lead_time_days_min }}-{{ v.item.lead_time_days_max }}</td>
+          <td class="small">{{ v.item.default_supplier_id or "auto" }}</td>
+          <td class="num">{{ v.on_hand }}</td>
+          <td class="num">{{ v.in_transit }}</td>
+          <td class="num">{{ v.committed }}</td>
+          <td>
+            {% if v.item.is_assembly %}<span class="tag accent">sub-assembly</span>{% endif %}
+            {% if v.on_hand == 0 and v.in_transit == 0 and v.committed == 0 %}<span class="tag datetime">unstocked</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

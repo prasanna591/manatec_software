@@ -79,15 +79,26 @@ class MockERP:
         return lines
 
     def stock(self) -> list[dict]:
-        return [
-            {
-                "item": f"ITM{i:04d}",
-                "warehouse": "MAIN",
-                "on_hand": 100 - i * 3,
-                "reserved": i,
-            }
-            for i in range(1, self.item_count + 1)
-        ]
+        rows = []
+        for i in range(1, self.item_count + 1):
+            rows.append(
+                {
+                    "item": f"ITM{i:04d}",
+                    "warehouse": "MAIN",
+                    "on_hand": 100 - i * 3,
+                    "reserved": i,
+                }
+            )
+            if i % 3 == 0:  # a second warehouse so transfers/stock-takes demo
+                rows.append(
+                    {
+                        "item": f"ITM{i:04d}",
+                        "warehouse": "WIP",
+                        "on_hand": 15 + i,
+                        "reserved": 0,
+                    }
+                )
+        return rows
 
     def sales_orders(self) -> list[dict]:
         """Deterministic demo orders; several intentionally past-due to exercise

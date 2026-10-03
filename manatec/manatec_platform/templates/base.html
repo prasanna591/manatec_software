@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ section }} · Manatec Platform</title>
+  <link rel="stylesheet" href="/static/plat.css">
+  <script src="/static/plat.js" defer></script>
+</head>
+<body data-section="{{ section }}">
+  <header class="topbar">
+    <a class="brand" href="/">
+      <div class="brand-mark">M</div>
+      <div>
+        <h1>Manatec Platform</h1>
+        <p>M0–M1 · Catalogue · BOM · Inventory · ATP</p>
+      </div>
+    </a>
+    <nav class="topnav">
+      <a href="/" class="{{ 'on' if section == 'Dashboard' }}">Dashboard</a>
+      <a href="/products" class="{{ 'on' if section.startswith('Product') }}">Products</a>
+      <a href="/bom" class="{{ 'on' if section.startswith('BOM') }}">BOM</a>
+      <a href="/items" class="{{ 'on' if section == 'Item Master' }}">Items</a>
+      <a href="/inventory" class="{{ 'on' if section == 'Inventory' }}">Inventory</a>
+      <a href="/atp" class="{{ 'on' if section == 'Available-to-Promise' }}">ATP</a>
+      <a href="/procurement" class="{{ 'on' if section == 'Procurement' }}">Procurement</a>
+      <a href="/production" class="{{ 'on' if section == 'Production Orders' }}">Production</a>
+      <a href="/quotes" class="{{ 'on' if section == 'Quotations' }}">Quotes</a>
+      <a href="/audit" class="{{ 'on' if section == 'Audit Trail' }}">Audit</a>
+    </nav>
+    <div class="topbar-actions">
+      {% if user %}
+      <span class="who">{{ user.full_name or user.username }} <em>[{{ user.role }}]</em></span>
+      <form method="post" action="/ui/logout"><button class="btn btn-ghost" type="submit">Sign out</button></form>
+      {% endif %}
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="page-head">
+      <h2>{{ section }}</h2>
+      <div class="crumbs">Manatec / {{ section }}</div>
+    </div>
+    {% block content %}{% endblock %}
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+</body>
+</html>

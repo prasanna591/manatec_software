@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Manatec Platform</title>
+  <link rel="stylesheet" href="/static/plat.css">
+</head>
+<body>
+  <style>
+    .login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+    .login-card { width: 100%; max-width: 380px; background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 34px 32px; box-shadow: 0 24px 60px rgba(0,0,0,.4); }
+    .login-card .brand { justify-content: center; margin-bottom: 22px; }
+    .login-card h2 { text-align: center; font-size: 19px; margin-bottom: 4px; }
+    .login-card .sub { text-align: center; color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+    .login-card form { display: flex; flex-direction: column; gap: 14px; }
+    .login-card label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 6px; }
+    .login-card input { padding: 11px 13px; }
+    .login-card .btn { padding: 12px; font-size: 14px; margin-top: 6px; }
+    .demo { margin-top: 20px; text-align: center; font-size: 12px; color: var(--muted); }
+  </style>
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="brand">
+        <div class="brand-mark">M</div>
+        <div><h1>Manatec Platform</h1></div>
+      </div>
+      <h2>Sign in</h2>
+      <p class="sub">Catalogue · BOM · Inventory · ATP</p>
+      {% if error %}<div class="notice notice-err">{{ error }}</div>{% endif %}
+      <form method="post" action="/ui/login">
+        <label>Username
+          <input name="username" value="admin" autocomplete="username" required>
+        </label>
+        <label>Password
+          <input name="password" type="password" value="admin123" autocomplete="current-password" required>
+        </label>
+        <button class="btn btn-primary" type="submit">Sign in</button>
+      </form>
+      <div class="demo">Default: <span class="mono">admin / admin123</span></div>
+    </div>
+  </div>
+</body>
+</html>

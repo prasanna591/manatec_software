@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="cards">
+  <div class="card ok"><a class="full" href="/atp"><div class="num">{{ stats.buildable }}</div><div class="lbl">Buildable from stock</div></a></div>
+  <div class="card bad"><a class="full" href="/atp"><div class="num">{{ stats.blocked }}</div><div class="lbl">Blocked on materials</div></a></div>
+  <div class="card accent"><a class="full" href="/products"><div class="num">{{ stats.products }}</div><div class="lbl">Products in catalogue</div></a></div>
+  <div class="card"><a class="full" href="/bom"><div class="num">{{ stats.bom_products }}</div><div class="lbl">Products with BOM</div></a></div>
+  <div class="card warn"><a class="full" href="/inventory"><div class="num">{{ stats.low_stock_alerts }}</div><div class="lbl">Low-stock alerts</div></a></div>
+  <div class="card"><a class="full" href="/procurement"><div class="num">{{ stats.open_pos }}</div><div class="lbl">Open purchase orders</div></a></div>
+  <div class="card"><a class="full" href="/production"><div class="num">{{ stats.open_mo }}</div><div class="lbl">Open production orders<br><span class="small" style="color:var(--muted)">{{ stats.open_po_value | inr }} in POs</span></div></a></div>
+  <div class="card"><a class="full" href="/quotes"><div class="num">{{ stats.open_quotes }}</div><div class="lbl">Quotes in progress</div></a></div>
+</div>
+
+<div class="pilayout">
+  <div class="pimain">
+    <div class="panel">
+      <div class="panel-title">Buildable-now across catalogue</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Product</th><th class="num">Units now</th><th>Limiting item</th><th class="num">Shortage value</th><th class="num">Worst lead (d)</th>
+          </tr></thead>
+          <tbody>
+            {% for r in top %}
+            <tr class="{{ 'row-short' if r.buildable_now == 0 }}">
+              <td><a href="/bom/{{ r.product_id }}">{{ r.product_name }}</a></td>
+              <td class="num"><b class="{{ 'ok' if (r.buildable_now or 0) > 0 else 'bad' }}">{{ r.buildable_now if r.buildable_now is not none else '—' }}</b></td>
+              <td class="mono small">{{ r.limiting_item or '' }}</td>
+              <td class="num">{{ r.total_line_value | inr if r.total_line_value else "—" }}</td>
+              <td class="num">{{ r.max_lead_days or "—" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="pimargin">
+    <div class="panel">
+      <div class="panel-title">Recent activity</div>
+      {% if recent %}
+      <ul class="feed">
+        {% for a in recent %}
+        <li><span class="tag dim">{{ a.action }}</span> <span class="small">{{ a.entity }} #{{ a.entity_id }} · {{ a.username or '—' }} · {{ a.created_at }}</span></li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="empty-state">No activity yet</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<style>
+  .pilayout { display: grid; grid-template-columns: 1fr 320px; gap: 20px; align-items: start; }
+  @media (max-width: 1100px) { .pilayout { grid-template-columns: 1fr; } }
+  .feed { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+  .feed li { display: flex; flex-direction: column; gap: 2px; border-bottom: 1px solid #1c2740; padding-bottom: 8px; }
+</style>
+{% endblock %}

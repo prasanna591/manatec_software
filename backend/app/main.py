@@ -7,7 +7,30 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
-from .routers import admin, audit, auth, dashboard, integration, notifications, search, tasks
+from .routers import (
+    admin,
+    analyzer,
+    announcements,
+    atp,
+    attendance,
+    audit,
+    auth,
+    bom,
+    catalog,
+    dashboard,
+    guests,
+    imports,
+    integration,
+    inventory,
+    leave,
+    notifications,
+    procurement,
+    production,
+    quotes,
+    search,
+    stores,
+    tasks,
+)
 
 log = logging.getLogger("manatec")
 
@@ -34,7 +57,30 @@ app.add_middleware(
 )
 
 API = "/api/v1"
-for r in (auth, admin, integration, notifications, tasks, dashboard, audit, search):
+for r in (
+    auth,
+    admin,
+    integration,
+    notifications,
+    tasks,
+    dashboard,
+    audit,
+    search,
+    stores,
+    catalog,
+    inventory,
+    bom,
+    atp,
+    procurement,
+    production,
+    quotes,
+    analyzer,
+    imports,
+    attendance,
+    leave,
+    guests,
+    announcements,
+):
     app.include_router(r.router, prefix=API)
 
 

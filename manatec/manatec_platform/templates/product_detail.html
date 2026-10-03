@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="panel" style="display:flex;gap:22px;flex-wrap:wrap">
+  {% if product.image_url %}
+  <img src="{{ product.image_url }}" style="width:180px;height:180px;object-fit:contain;background:#fff;border-radius:10px;border:1px solid var(--border);padding:8px" referrerpolicy="no-referrer" alt="">
+  {% endif %}
+  <div style="flex:1;min-width:260px">
+    <div class="product-cat" style="color:var(--muted);text-transform:uppercase;font-size:11px">{{ product.family_name or product.category or "—" }}</div>
+    <h3 style="font-size:20px;margin:6px 0">{{ product.name }}</h3>
+    <div style="color:var(--accent);font-weight:700;font-size:18px">{{ product.price_raw or (product.price_value | inr) }}</div>
+    <div class="product-stats" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <span class="stat-chip">Model <b>{{ product.model_code or "—" }}</b></span>
+      <span class="stat-chip">BOM <b>{{ "yes" if meta else "none" }}</b></span>
+      {% if atp.has_bom %}
+      <span class="stat-chip">Buildable now <b class="{{ 'ok' if (atp.buildable_now or 0) > 0 else 'bad' }}">{{ atp.buildable_now or 0 }}</b></span>
+      <span class="stat-chip">Limiting <b class="mono">{{ atp.limiting_item or "—" }}</b></span>
+      {% else %}
+      <span class="stat-chip">Buildable now <b>—</b></span>
+      {% endif %}
+      <span class="stat-chip">Status <b>{{ product.status }}</b></span>
+    </div>
+    {% if meta %}
+    <div style="margin-top:14px"><a class="btn btn-primary" href="/bom/{{ product.id }}">Open BOM →</a></div>
+    {% endif %}
+  </div>
+</div>
+
+{% if flat %}
+<div class="panel">
+  <div class="panel-title">Material per unit (exploded, with scrap)</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Code</th><th>Description</th><th class="num">Qty / unit</th><th class="num">On hand</th><th class="num">In transit</th><th class="num">Committed</th><th class="num">Available</th></tr></thead>
+      <tbody>
+        {% for c in coverage %}
+        <tr class="{{ 'row-short' if c.short > 0 }}">
+          <td class="mono">{{ c.code }}</td>
+          <td>{{ c.description }}</td>
+          <td class="num">{{ c.need_per_unit }}</td>
+          <td class="num">{{ c.on_hand }}</td>
+          <td class="num">{{ c.in_transit }}</td>
+          <td class="num">{{ c.committed }}</td>
+          <td class="num">{{ c.avail }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div style="margin-top:14px;color:var(--muted);font-size:12px">Revisions:
+    {% for r in meta.revs %}<span class="tag {{ 'ok' if r.status == 'active' else 'dim' }}">rev {{ r.rev_no }} ({{ r.status }})</span>{% endfor %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

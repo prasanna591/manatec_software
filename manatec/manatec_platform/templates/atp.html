@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="panel">
+  <div class="panel-title">Everything buildable-from-stock, or what's blocking it</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Product</th><th class="num">Buildable now</th>
+        <th>Limiting item</th><th class="num">Worst lead (d)</th><th>Result</th>
+      </tr></thead>
+      <tbody>
+        {% for r in results %}
+        {% set blocked = r.has_bom and (not r.buildable_now or r.buildable_now == 0) %}
+        <tr class="{{ 'row-short' if blocked }}">
+          <td><a href="/bom/{{ r.product_id }}">{{ r.product_name }}</a></td>
+          <td class="num"><b class="{{ 'ok' if (r.buildable_now or 0) > 0 else 'bad' }}">{{ r.buildable_now if r.buildable_now is not none else '—' }}</b></td>
+          <td class="mono small">{{ r.limiting_item or '—' }}</td>
+          <td class="num">{{ r.max_lead_days or "—" }}</td>
+          <td>
+            {% if not r.has_bom %}<span class="tag datetime">no BOM</span>
+            {% elif blocked %}<span class="tag short">blocked</span>
+            {% else %}<span class="tag ok">ok</span>{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="empty-state">No products have a BOM yet</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-title">What-if: build N units of a product</div>
+  <form id="whatif-form">
+    <div class="toolbar">
+      <label class="field" style="flex:1">Product
+        <select name="product_id" required>
+          {% for r in results %}
+          <option value="{{ r.product_id }}">{{ r.product_name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field" style="width:140px">Quantity
+        <input name="qty" type="number" min="1" step="1" value="5" required>
+      </label>
+      <button class="btn btn-primary" type="submit" style="align-self:end">Compute</button>
+    </div>
+  </form>
+  <div id="whatif-out" class="hidden"></div>
+</div>
+
+<script>
+document.getElementById("whatif-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  const out = document.getElementById("whatif-out");
+  const btn = ev.target.querySelector("button");
+  btn.disabled = true;
+  try {
+    const r = await window.manatec.api("/atp/what-if", {
+      method: "POST",
+      body: { product_id: +f.get("product_id"), qty: +f.get("qty") },
+    });
+    let extra = "";
+    if (r.ok_for_target) extra = `<span class="tag ok">can build ${r.whatif_qty} from stock</span>`;
+    else extra = `<span class="tag short">short — top lead ${r.max_lead_days} d, shortage value ${window.inrFmt ? "" : ""}₹ ${(r.shortage_value||0).toLocaleString("en-IN")}</span>`;
+    out.innerHTML = `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+        <span class="big-num ${r.ok_for_target ? 'ok' : 'bad'}">${r.whatif_qty}</span> units
+        ${extra}
+        <span class="stat-chip">Limiting: <b class="mono">${r.limiting_item || "—"}</b></span>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Code</th><th>Description</th><th class="num">Need/unit</th><th class="num">Req for ${r.whatif_qty}</th><th class="num">Avail</th><th class="num">Short</th><th class="num">Worst lead</th></tr></thead>
+        <tbody>
+        ${r.coverage.map(c => `<tr class="${c.short>0?'row-short':''}">
+          <td class="mono">${c.code}</td><td>${c.description}</td>
+          <td class="num">${c.need_per_unit}</td><td class="num">${(c.need_per_unit*r.whatif_qty).toFixed(3)}</td>
+          <td class="num">${c.avail}</td>
+          <td class="num">${c.short>0?'<span class="short-tag">'+c.short+'</span>':'0'}</td>
+          <td class="num">${c.lead_days_max}</td>
+        </tr>`).join("")}
+        </tbody>
+      </table></div>`;
+    out.classList.remove("hidden");
+  } catch (err) {
+    window.manatec.toast("Error: " + err.message, "err");
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+{% endblock %}

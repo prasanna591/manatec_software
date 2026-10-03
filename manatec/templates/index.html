@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BOM Analyzer — Manufacturing Production Estimator</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">◆</div>
+    <div>
+      <h1>BOM Analyzer</h1>
+      <p>Manufacturing Production Estimator</p>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <button class="btn btn-ghost" id="btnSample" title="Load the sample CSV files into the upload slots">Load sample files</button>
+    <button class="btn btn-primary" id="btnRun" disabled>Run Analysis</button>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- ============ LEFT: INPUTS ============ -->
+  <section class="panel inputs-panel">
+    <h2 class="panel-title">Inputs</h2>
+
+    <div class="upload-group">
+      <div class="dropzone" id="dzInventory" data-target="inventory">
+        <input type="file" id="fileInventory" accept=".csv,.xlsx,.xls" hidden />
+        <div class="dz-icon">▤</div>
+        <div class="dz-title">Inventory Items</div>
+        <div class="dz-desc">Drag &amp; drop or click — CSV / Excel.<br/>Columns: <em>Item</em>, <em>Qty</em></div>
+        <div class="dz-file" id="invFileLabel"></div>
+      </div>
+      <div class="dropzone" id="dzMaster" data-target="master">
+        <input type="file" id="fileMaster" accept=".csv,.xlsx,.xls" hidden />
+        <div class="dz-icon">◫</div>
+        <div class="dz-title">Master BOM</div>
+        <div class="dz-desc">One sheet per product, or a <em>Product</em> column.<br/>Columns: <em>Product</em>, <em>Item</em>, <em>Qty</em></div>
+        <div class="dz-file" id="masterFileLabel"></div>
+      </div>
+    </div>
+
+    <details class="advanced">
+      <summary>Column overrides <span>(optional)</span></summary>
+      <div class="override-grid">
+        <label>Inventory · item column<input type="text" id="ovInvItem" placeholder="auto-detect" /></label>
+        <label>Inventory · qty column<input type="text" id="ovInvQty" placeholder="auto-detect" /></label>
+        <label>Master · item column<input type="text" id="ovMasterItem" placeholder="auto-detect" /></label>
+        <label>Master · qty column<input type="text" id="ovMasterQty" placeholder="auto-detect" /></label>
+        <label>Master · product column<input type="text" id="ovMasterProduct" placeholder="auto-detect" /></label>
+      </div>
+    </details>
+
+    <div id="notice"></div>
+  </section>
+
+  <!-- ============ RIGHT: RESULTS ============ -->
+  <section class="panel results-panel">
+    <h2 class="panel-title">Results</h2>
+
+    <div id="emptyState" class="empty-state">
+      <div class="empty-icon">📊</div>
+      <p>Upload your <strong>inventory</strong> and <strong>master BOM</strong> files,
+      then press <em>Run Analysis</em> to see how many products you can build,
+      what's missing, and what's in excess.</p>
+    </div>
+
+    <div id="loading" class="loading hidden">
+      <div class="spinner"></div>
+      <p>Analyzing BOM against inventory…</p>
+    </div>
+
+    <div id="results" class="hidden">
+      <!-- summary cards -->
+      <div class="cards" id="summaryCards"></div>
+
+      <!-- product tiles -->
+      <div class="products" id="products"></div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  BOM Analyzer · processes files locally on this server · supports CSV / XLSX / XLS
+</footer>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

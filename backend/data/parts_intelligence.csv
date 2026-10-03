@@ -1,0 +1,95 @@
+product_family,component_group,component,typical_use,purchase_type,lead_time_class,typical_lead_time_days,notes
+Wheel Balancer,Mechanical,Shaft & cone assembly,Wheel mounting spindle,Bought-out,Medium,15-30,Standard balancer spindles
+Wheel Balancer,Mechanical,Wheel adapters / cones set,Centre wheel fitting for car/LCV wheels,Bought-out,Medium,15-30,OEM set typically 5-8 cones
+Wheel Balancer,Mechanical,Cabinet & side covers sheet metal,Body / enclosure,Fabricated in-house,Short,5-10,Requires painted MS fabrication
+Wheel Balancer,Mechanical,Plexiglass wheel guard,Operator safety guard bought as acrylic sheet then cut,Bought-out,Short,7-14,Acrylic/PC sheet
+Wheel Balancer,Mechanical,Vibration damping feet,Base isolation,Bought-out,Short,3-7,Standard rubber mounts
+Wheel Balancer,Electrical,AC motor (0.35-5 HP),Spindle drive,Bought-out,Medium,20-40,Key long-lead item; imported motors 25-40
+Wheel Balancer,Electrical,Brake system & solenoid,Balancer brake,Bought-out,Medium,15-30,Electro-mechanical brake
+Wheel Balancer,Electrical,Start switch / limit switches,Controls & guard interlock,Bought-out,Short,5-15,Standard industrial switches
+Wheel Balancer,Electronics,Strain/load-cell sensors,Unbalance measurement,Bought-out,Long,30-60,Imported precision sensor
+Wheel Balancer,Electronics,Encoder / position sensor,Rim dimension and distance input,Bought-out,Long,30-60,Imported if high resolution
+Wheel Balancer,Electronics,Main DSP PCB assembly,Signal processing / balancing logic,In-house SMT + bought components,Medium,15-30,Depends on component availability
+Wheel Balancer,Electronics,LED dashboard monitor,Display,Bought-out,Medium,15-30,15.5" LED type
+Wheel Balancer,Electronics,Power supply unit,PCB power,Bought-out,Medium,15-30,SMPS
+Wheel Balancer,Electronics,Calibration weights kit,Verification/calibration,Bought-out,Short,7-14,Required for QC
+Wheel Balancer,Consumables,Deep-groove ball bearings,Spindle bearings,Bought-out,Medium,20-40,Imported grade SKF/NSK typical
+Wheel Balancer,Consumables,Fasteners & hardware,M12/M8 etc,Bought-out,Short,3-7,Vendor-managed possible
+Wheel Balancer,Consumables,Powder coating / paint,Finish,Bought-out,Short,5-10,Service job
+Wheel Balancer,Consumables,Labels & decals,Identification/nameplate,Bought-out,Short,3-7,Branding & serial plates
+Wheel Balancer,Consumables,Packaging (wooden crate + foam),Export-grade packing,Bought-out,Short,5-10,Used for dispatches
+3D Wheel Aligner,Mechanical,Columns & boom assembly (MS),Rotating boom structure,Fabricated in-house,Short,10-20,CNC cut + welded + painted
+3D Wheel Aligner,Mechanical,Wheel targets (PCD fixtures),Fixed on wheels for imaging,Bought-out,Medium,30-60,Imported precision targets commonly
+3D Wheel Aligner,Mechanical,Stand & castors,Portable base,In-house,Short,5-10,
+3D Wheel Aligner,Electronics,High-resolution cameras (pair),Vision based alignment measurement,Bought-out,Long,40-80,Imported; longest lead item
+3D Wheel Aligner,Electronics,Embedded PC / mini-ITX,Main processing unit,Bought-out,Medium,20-40,With OS preinstalled
+3D Wheel Aligner,Electronics,Display monitor,UI,Bought-out,Medium,15-30,LCD/LED
+3D Wheel Aligner,Electronics,PCB assemblies & wiring loom,Interconnect,In-house,Medium,15-30,
+3D Wheel Aligner,Electronics,Power supply unit,Power,Bought-out,Medium,15-30,
+3D Wheel Aligner,Software,Alignment software suite + vehicle database,Measurement application & data,In-house + licensed,Short,5-15,Vehicle database updates recurring
+3D Wheel Aligner,Consumables,Calibration fixtures,QC standard,Bought-out,Long,30-60,Master calibration kit
+3D Wheel Aligner,Consumables,Fasteners / paint / packaging,General,Bought-out,Short,3-10,
+Tyre Changer,Mechanical,Cast iron turntable & table,Base for wheel work,Bought-out,Long,30-60,Castings are long-lead
+Tyre Changer,Mechanical,Bead breaker arm & shoe,Loosening tyre bead,Bought-out,Medium,15-30,
+Tyre Changer,Mechanical,Clamps & jaws,Wheel clamp Bought-out,Medium,15-30,
+Tyre Changer,Hydraulic-Pneumatic,Pneumatic motor / cylinder,Table rotation & tools,Bought-out,Medium,20-40,
+Tyre Changer,Hydraulic-Pneumatic,Foot pedals & air valves,Operator control,Bought-out,Medium,15-30,Pneumatic valve kit
+Tyre Changer,Electrical,Electric motor (HCV models),Power rotate for heavy tyres,Bought-out,Medium,20-40,
+Tyre Changer,Electrical,Control box & switches,Control,Bought-out,Medium,15-30,
+Tyre Changer,Consumables,Bearings / seals / O-rings,Assembly,Bought-out,Medium,15-30,
+Tyre Changer,Consumables,Lubricants & paste,Bead lubrication,Bought-out,Short,3-7,
+Two Post / Four Post / Scissor Lift,Mechanical,MS columns / base plates,Fabricated main structure,Fabricated in-house,Short,10-20,Heavy fabrication
+Two Post / Four Post / Scissor Lift,Mechanical,Lifting arms (telescopic),Vehicle lifting arms,In-house,Short,10-20,
+Two Post / Four Post / Scissor Lift,Mechanical,Steel rope / synchronous chain,Synchronisation of arms,Bought-out,Medium,20-40,Chain heavy duty
+Two Post / Four Post / Scissor Lift,Mechanical,Safety latch & lock system,Mechanical safety,Bought-out,Medium,15-30,
+Two Post / Four Post / Scissor Lift,Mechanical,Pulleys & bushings,Pulley system,Bought-out,Medium,15-30,
+Two Post / Four Post / Scissor Lift,Hydraulic-Pneumatic,Hydraulic cylinders (double),Lifting power,In-house or bought,Medium,30-45,OEM cylinder assembly
+Two Post / Four Post / Scissor Lift,Hydraulic-Pneumatic,Hydraulic pump & power pack,Hydraulic power unit,Bought-out,Medium,25-45,
+Two Post / Four Post / Scissor Lift,Hydraulic-Pneumatic,Hoses & hydraulic oil,Hydraulic circuit,Bought-out,Short,10-20,
+Two Post / Four Post / Scissor Lift,Electrical,Electric motor (2-4 kW),Pump drive,Bought-out,Medium,20-40,
+Two Post / Four Post / Scissor Lift,Electrical,Limit switches & pendant control,Control,Bought-out,Short,10-20,
+Two Post / Four Post / Scissor Lift,Consumables,Anchor bolts & fasteners,Site installation,Bought-out,Short,5-10,Installation hardware kit
+Two Post / Four Post / Scissor Lift,Consumables,Paint / packaging,Finish,Bought-out,Short,5-10,
+Air Compressor (Reciprocating & Screw),Mechanical,Compressor pump/head unit,Air compression core,Bought-out,Long,30-60,Core compressor casting
+Air Compressor (Reciprocating & Screw),Mechanical,Air tank (MS welded),Receiver vessel,Fabricated in-house,Short,10-20,Pneumatic certification needed
+Air Compressor (Reciprocating & Screw),Mechanical,Flywheel / pulley / belts,Drive,Bought-out,Medium,15-30,
+Air Compressor (Reciprocating & Screw),Pneumatic,Pressure switch,Auto cut-off,Bought-out,Medium,15-30,
+Air Compressor (Reciprocating & Screw),Pneumatic,Safety & non-return valves,Safety,Bought-out,Short,10-20,
+Air Compressor (Reciprocating & Screw),Pneumatic,Regulator + gauge + drain valve,Output control,Bought-out,Medium,15-30,
+Air Compressor (Reciprocating & Screw),Electrical,Motor (3-15 HP),Compressor drive,Bought-out,Medium,20-40,
+Air Compressor (Reciprocating & Screw),Electrical,Starter / contactor / wiring,Electrical control,Bought-out,Short,10-20,
+Air Compressor (Reciprocating & Screw),Consumables,Air filters & oil,Maintenance pack,Bought-out,Short,7-14,
+Paint Spray Booth,Mechanical,MS sheet panels & roof,Fabricated booth structure,Fabricated in-house,Short,15-30,Large fabrication
+Paint Spray Booth,Mechanical,Inside ramp & doors,Booth entry,Bought-out,Medium,20-40,
+Paint Spray Booth,Pneumatic,Exhaust blowers & intake filters,Air flow system,Bought-out,Medium,25-45,Key component
+Paint Spray Booth,Electrical,IR heaters / lamps,Oven heating,Bought-out,Long,40-60,Infra red heating kit
+Paint Spray Booth,Electrical,Explosion-proof lighting & panel,Booth lighting & control,In-house,Medium,20-40,
+Paint Spray Booth,Consumables,Filter media & sealants,Air quality,Bought-out,Short,7-14,Recurring
+Nitrogen Filling Station,Mechanical,Pressure vessel / tank (40L),Storage,Fabricated in-house,Short,15-25,Certification
+Nitrogen Filling Station,Pneumatic,Gas separation membrane,Generates pure N2 from air,Bought-out,Long,40-70,Imported - longest lead
+Nitrogen Filling Station,Pneumatic,Regulators & gauges,Output control,Bought-out,Medium,15-30,
+Nitrogen Filling Station,Pneumatic,Valves & fittings,Flow circuit,Bought-out,Medium,15-30,
+Nitrogen Filling Station,Electrical,Small compressor (MO models),Feed air source,Bought-out,Medium,20-40,
+AC Gas Charging / Recycling,Mechanical,Recovery compressor & vacuum pump,Refrigerant recovery,Bought-out,Long,30-60,Professional refrigeration parts
+AC Gas Charging / Recycling,Mechanical,Manifold gauge set & hoses,Charge circuit,Bought-out,Medium,20-40,
+AC Gas Charging / Recycling,Pneumatic,Solenoid valves & relays,Refrigerant routing,Bought-out,Medium,15-30,
+AC Gas Charging / Recycling,Electronics,Pressure & temperature sensors,Measurement,Bought-out,Medium,20-40,
+AC Gas Charging / Recycling,Electronics,PCB + display,Control & UI,In-house,Medium,15-30,
+AC Gas Charging / Recycling,Consumables,Refrigerant, oil, filters,Service consumables,Bought-out,Short,7-14,
+Pollution Checking Equipment,Mechanical,Sampling probe & housing,Exhaust sampling,In-house,Short,10-20,
+Pollution Checking Equipment,Electronics,NDIR gas sensors,CO/HC/NOx measurement,Bought-out,Long,40-70,Imported sensors - long lead
+Pollution Checking Equipment,Electronics,Opacity sensor (smoke meter),Smoke measurement,Bought-out,Long,40-70,
+Pollution Checking Equipment,Electronics,Sample pump & PCB + display,Measurement electronics,In-house,Medium,15-30,
+Pollution Checking Equipment,Consumables,Calibration gas kit,QC,Bought-out,Medium,20-40,Recurring - must have stock
+High Pressure Car Washer,Mechanical,Plunger pressure pump,Pressure generation,Bought-out,Long,30-60,
+High Pressure Car Washer,Mechanical,Frame & hose + lance nozzles,Body and delivery,Bought-out,Medium,15-30,
+High Pressure Car Washer,Electrical,Motor single/3-phase,Pump drive,Bought-out,Medium,20-40,
+High Pressure Car Washer,Consumables,Seals & fasteners,Assembly,Bought-out,Short,7-14,
+TPMS (Tyre Pressure Monitoring),Electronics,TPMS sensors (4/6 pack),Wheel pressure sensing,Bought-out,Long,30-60,Supplier pack
+TPMS (Tyre Pressure Monitoring),Electronics,Display unit & receiver,In-car display,In-house,Medium,15-30,
+TPMS (Tyre Pressure Monitoring),Software,Config & pairing tooling,Commissioning,In-house,Short,5-10,
+EV Hub Motor Drive Kit,Electronics,Hub motor & controller,EV drive,Supplied subassembly,Medium,30-60,Project-specific
+EV Hub Motor Drive Kit,Electrical,Throttle & wiring loom,Controls,Bought-out,Medium,15-30,Project-specific
+Miscellaneous (Welding/Plasma,Vacuum,Inflator,Dent Puller,Disinfection,etc.),Electrical,Transformers / inverter PCB,Fabrication machines power stage,Bought-out,Medium,20-40,Varies machine to machine
+Miscellaneous (Welding/Plasma,Vacuum,Inflator,Dent Puller,Disinfection,etc.),Mechanical,Imported machine bodies & nozzles,Main structure,Bought-out,Medium,20-40,Varies machine to machine
+Miscellaneous (Welding/Plasma,Vacuum,Inflator,Dent Puller,Disinfection,etc.),Consumables,Fasteners, labels, packaging,General finish,Bought-out,Short,3-10,Common across families

@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="panel">
+  <div class="panel-title">Buy-list — what to order to build N units</div>
+  <div class="toolbar">
+    <label class="field" style="flex:1">Product
+      <select id="bl-product">
+        {% for p in products %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="field" style="width:140px">Target qty
+      <input id="bl-qty" type="number" min="1" value="5">
+    </label>
+    <button class="btn btn-primary" style="align-self:end" id="bl-run">Recommend</button>
+  </div>
+  <div id="bl-out"></div>
+</div>
+
+<div class="panel">
+  <div class="panel-title">Purchase orders</div>
+  {% for po in pos %}
+  <div class="po-block" data-po="{{ po.id }}">
+    <div class="po-head">
+      <div><b class="mono">{{ po.po_no }}</b> <span class="tag {{ 'ok' if po.status == 'completed' else ('dim' if po.status == 'draft' else ('warn' if po.overdue else 'accent')) }}">{{ po.status }}</span></div>
+      <div class="small muted">{{ po.supplier_name }}</div>
+      <div class="num" style="margin-left:auto"><b>{{ po.total_value | inr }}</b></div>
+    </div>
+    <div class="table-wrap" style="margin-top:8px">
+      <table>
+        <thead><tr><th>Code</th><th>Description</th><th class="num">Ordered</th><th class="num">Received</th><th class="num">Remaining</th><th class="num">Unit ₹</th><th class="num" style="width:150px">Receive</th></tr></thead>
+        <tbody>
+          {% for l in po.lines %}
+          <tr>
+            <td class="mono">{{ l.code }}</td>
+            <td>{{ l.description }}</td>
+            <td class="num">{{ l.qty }}</td>
+            <td class="num">{{ l.received_qty }}</td>
+            <td class="num">{{ l.remaining }}</td>
+            <td class="num">{{ l.unit_price }}</td>
+            <td>
+              {% if po.status in ("issued","partial") %}
+              <input class="rcv-in" data-line="{{ l.id }}" type="number" min="0" step="0.01" max="{{ l.remaining }}" style="width:110px;padding:6px 8px" placeholder="{{ l.remaining }}">
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="po-actions">
+      {% if po.status == "draft" %}
+      <button class="btn btn-sm btn-primary" data-action="issue" data-po="{{ po.id }}">Issue to supplier</button>
+      {% elif po.status in ("issued", "partial") %}
+      <button class="btn btn-sm btn-primary" data-action="receive" data-po="{{ po.id }}">Post GRN (receipts above)</button>
+      <button class="btn btn-sm" data-action="issue" data-po="{{ po.id }}" disabled title="Already issued">Issued {{ po.issue_date }}</button>
+      {% endif %}
+      {% if po.overdue %}<span class="tag short">overdue {{ po.expected_delivery_date }}</span>{% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="empty-state">No purchase orders — run a buy-list first</div>
+  {% endfor %}
+</div>
+
+<style>
+  .po-block { border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 16px; }
+  .po-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .po-actions { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
+</style>
+
+<script>
+const blRun = document.getElementById("bl-run");
+blRun.addEventListener("click", async () => {
+  const out = document.getElementById("bl-out");
+  blRun.disabled = true;
+  try {
+    const r = await window.manatec.api("/procurement/buy-list", {
+      method: "POST",
+      body: { product_id: +document.getElementById("bl-product").value,
+              qty: +document.getElementById("bl-qty").value },
+    });
+    if (r.ok) {
+      out.innerHTML = `<div class="notice notice-ok">All materials available — ${r.rows.length} shortage lines, can build ${r.qty} from stock.</div>`;
+      return;
+    }
+    const bySupp = {};
+    r.rows.forEach(row => {
+      (bySupp[row.supplier_id || "none"] = bySupp[row.supplier_id || "none"] || []).push(row);
+    });
+    let html = `<div class="notice notice-ok">Target ${r.target_qty} units — shortage value ${(r.total_value||0).toLocaleString("en-IN")} ₹ · worst lead ${r.max_lead_days} d</div>`;
+    for (const [sid, rows] of Object.entries(bySupp)) {
+      const supl = rows[0];
+      html += `<div class="buy-group">
+        <div class="buy-supp"><b>${supl.supplier_name}</b>
+          <button class="btn btn-sm btn-primary" data-sup="${sid}" data-qty="${r.target_qty}" data-pid="${r.product_id}">Create PO</button>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Code</th><th>Description</th><th class="num">Short</th><th class="num">Unit ₹</th><th class="num">Value</th><th class="num">Lead d</th></tr></thead>
+          <tbody>
+          ${rows.map(x => `<tr><td class="mono">${x.code}</td><td>${x.description}</td><td class="num">${x.qty_short}</td><td class="num">${x.unit_cost}</td><td class="num">${x.value.toLocaleString("en-IN")}</td><td class="num">${x.lead_days_min}-${x.lead_days_max}</td></tr>`).join("")}
+          </tbody>
+        </table></div></div>`;
+    }
+    out.innerHTML = html;
+    out.querySelectorAll("[data-sup]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const sid = +btn.dataset.sup;
+        const pid = +btn.dataset.pid;
+        const g = btn.closest(".buy-group");
+        const rows = [...document.querySelectorAll(".buy-group")].find(x => x === g);
+        const data = await window.manatec.api("/procurement/buy-list", { method: "POST", body: { product_id: pid, qty: +btn.dataset.qty } });
+        const myRows = data.rows.filter(x => (x.supplier_id || "none") === sid);
+        const lines = myRows.map(x => ({ item_id: x.item_id, qty: Math.ceil(x.qty_short), unit_price: x.unit_cost }));
+        const res = await window.manatec.api("/procurement/purchase-orders", {
+          method: "POST",
+          body: { supplier_id: sid, lines, note: `Buy-list for ${data.product_name} × ${data.target_qty}` },
+        });
+        window.manatec.toast(`PO ${res.po_no} created — ₹ ${res.total_value.toLocaleString("en-IN")}`);
+        setTimeout(() => location.reload(), 900);
+      });
+    });
+  } catch (err) {
+    window.manatec.toast("Error: " + err.message, "err");
+  } finally {
+    blRun.disabled = false;
+  }
+});
+
+document.querySelectorAll("[data-action]").forEach(btn => {
+  btn.addEventListener("click", async () => {
+    const po = +btn.dataset.po;
+    const act = btn.dataset.action;
+    try {
+      if (act === "issue") {
+        await window.manatec.api(`/procurement/purchase-orders/${po}/issue`, { method: "POST", body: {} });
+        window.manatec.toast("PO issued.");
+      } else {
+        const lines = [...btn.closest(".po-block").querySelectorAll(".rcv-in")].map(i => ({
+          line_id: +i.dataset.line, qty: (i.value === "") ? 0 : +i.value,
+        })).filter(x => x.qty > 0);
+        if (!lines.length) return window.manatec.toast("Enter receipt quantities first.", "err");
+        await window.manatec.api(`/procurement/purchase-orders/${po}/receive`, { method: "POST", body: { lines } });
+        window.manatec.toast("Goods receipt posted.");
+      }
+      setTimeout(() => location.reload(), 700);
+    } catch (err) {
+      window.manatec.toast("Error: " + err.message, "err");
+    }
+  });
+});
+</script>
+{% endblock %}

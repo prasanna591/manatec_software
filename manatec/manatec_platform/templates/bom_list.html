@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="toolbar">
+  <span class="count-hint">{{ rows|length }} products with an active BOM revision</span>
+  <a class="btn right" href="/products">+ Manage catalogue</a>
+</div>
+<div class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Product</th><th>Category</th><th>Rev</th><th class="num">Lines</th><th class="num">Exploded items</th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td><a href="/bom/{{ r.product_id }}">{{ r.product_name }}</a></td>
+          <td class="small">{{ r.category or "—" }}</td>
+          <td><span class="tag ok">rev {{ r.rev_no }}</span></td>
+          <td class="num">{{ r.lines }}</td>
+          <td class="num">{{ r.exploded_items }}</td>
+          <td><a class="btn btn-sm" href="/bom/{{ r.product_id }}">Open →</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="empty-state">No BOMs yet — import sample BOM or build one</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="grid2">
+  <div class="panel">
+    <div class="panel-title">Import BOM (CSV/XLSX)</div>
+    <form id="bom-import-form" enctype="multipart/form-data">
+      <input type="file" name="file" accept=".csv,.xlsx" required style="width:100%">
+      <p class="small muted" style="margin:8px 0">Columns: <span class="mono">Product, Item/Item Code, Qty Required Per Unit</span> ·
+        <a href="/samples/bom" download>download demo BOM.csv</a></p>
+      <button class="btn btn-primary" type="submit">Import</button>
+    </form>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Import stock (opening balance)</div>
+    <form id="inv-import-form" enctype="multipart/form-data">
+      <input type="file" name="file" accept=".csv,.xlsx" required style="width:100%">
+      <p class="small muted" style="margin:8px 0">Columns: <span class="mono">Item Code, Quantity Available</span> ·
+        <a href="/samples/inventory" download>download demo stock.csv</a></p>
+      <button class="btn btn-primary" type="submit">Import</button>
+    </form>
+  </div>
+</div>
+
+<script>
+document.getElementById("bom-import-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  const r = await fetch("/api/v1/import/bom", { method: "POST", body: f });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) return window.manatec.toast("Error: " + (j.detail || r.statusText), "err");
+  window.manatec.toast(`Imported ${j.lines} lines across ${j.products.length} products`);
+  setTimeout(() => location.reload(), 900);
+});
+document.getElementById("inv-import-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  const r = await fetch("/api/v1/import/inventory", { method: "POST", body: f });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) return window.manatec.toast("Error: " + (j.detail || r.statusText), "err");
+  window.manatec.toast(`Imported ${j.imported} stock rows`);
+  setTimeout(() => location.reload(), 900);
+});
+</script>
+{% endblock %}

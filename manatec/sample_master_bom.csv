@@ -1,0 +1,108 @@
+Product,Item Code,Qty Required Per Unit
+Sensor Module,RES-10K,2
+Sensor Module,RES-4.7K,1
+Sensor Module,CAP-100NF,4
+Sensor Module,CAP-10UF,2
+Sensor Module,LED-RED,1
+Sensor Module,IC-ATMEGA328P,1
+Sensor Module,PCB-SUB,1
+Sensor Module,CONN-HEADER-40P,2
+Sensor Module,SW-TACTILE,2
+Sensor Module,CRYSTAL-16MHZ,1
+Sensor Module,DIODE-1N4148,2
+Sensor Module,SENSOR-TEMP,1
+Sensor Module,SENSOR-CURRENT,1
+Sensor Module,THERMAL-PAD,1
+Sensor Module,SCREW-M3-10,4
+Sensor Module,NUT-M3,4
+Sensor Module,WASHER-M3,4
+Sensor Module,STICKER-LABEL,1
+Power Supply Unit,RES-100R,4
+Power Supply Unit,CAP-10UF,4
+Power Supply Unit,CAP-22PF,2
+Power Supply Unit,IC-LM7805,1
+Power Supply Unit,IC-LM358,1
+Power Supply Unit,PCB-MAIN,1
+Power Supply Unit,DIODE-BRIDGE,1
+Power Supply Unit,MOSFET-IRF540,2
+Power Supply Unit,CAP-ELEC-100UF,2
+Power Supply Unit,CAP-ELEC-470UF,1
+Power Supply Unit,INDUCTOR-10MH,1
+Power Supply Unit,FUSE-5A,1
+Power Supply Unit,VARISTOR-275V,1
+Power Supply Unit,SCREW-M3-10,4
+Power Control Board,RES-10K,8
+Power Control Board,RES-4.7K,4
+Power Control Board,RES-100R,4
+Power Control Board,CAP-100NF,8
+Power Control Board,CAP-10UF,4
+Power Control Board,LED-RED,2
+Power Control Board,LED-GREEN,2
+Power Control Board,LED-BLUE,2
+Power Control Board,IC-74HC595,2
+Power Control Board,IC-ATMEGA328P,1
+Power Control Board,IC-LM358,2
+Power Control Board,PCB-MAIN,1
+Power Control Board,CONN-USB-C,1
+Power Control Board,CONN-JST-3P,4
+Power Control Board,CONN-HEADER-40P,4
+Power Control Board,SW-TACTILE,6
+Power Control Board,SW-ROTO,1
+Power Control Board,DIODE-1N4148,4
+Power Control Board,DISPLAY-OLED,1
+Power Control Board,BUZZER,1
+Power Control Board,HEATSINK-TO220,2
+Power Control Board,SPACER-M3-10,4
+Power Control Board,FOAM-PAD,1
+Power Control Board,MANUAL-BOOK,1
+Full Kit (All-in-One),RES-10K,10
+Full Kit (All-in-One),RES-4.7K,5
+Full Kit (All-in-One),RES-100R,8
+Full Kit (All-in-One),CAP-100NF,12
+Full Kit (All-in-One),CAP-10UF,6
+Full Kit (All-in-One),CAP-22PF,2
+Full Kit (All-in-One),LED-RED,3
+Full Kit (All-in-One),LED-GREEN,2
+Full Kit (All-in-One),LED-BLUE,2
+Full Kit (All-in-One),IC-555,1
+Full Kit (All-in-One),IC-74HC595,2
+Full Kit (All-in-One),IC-ATMEGA328P,1
+Full Kit (All-in-One),IC-LM7805,1
+Full Kit (All-in-One),IC-LM358,2
+Full Kit (All-in-One),PCB-MAIN,1
+Full Kit (All-in-One),PCB-SUB,1
+Full Kit (All-in-One),CONN-USB-C,1
+Full Kit (All-in-One),CONN-JST-3P,4
+Full Kit (All-in-One),CONN-HEADER-40P,6
+Full Kit (All-in-One),SW-TACTILE,8
+Full Kit (All-in-One),SW-ROTO,1
+Full Kit (All-in-One),DIODE-1N4148,6
+Full Kit (All-in-One),DIODE-BRIDGE,1
+Full Kit (All-in-One),MOSFET-IRF540,1
+Full Kit (All-in-One),CAP-ELEC-100UF,2
+Full Kit (All-in-One),CAP-ELEC-470UF,1
+Full Kit (All-in-One),INDUCTOR-10MH,1
+Full Kit (All-in-One),CRYSTAL-16MHZ,1
+Full Kit (All-in-One),FUSE-5A,1
+Full Kit (All-in-One),SENSOR-TEMP,1
+Full Kit (All-in-One),SENSOR-CURRENT,1
+Full Kit (All-in-One),DISPLAY-OLED,1
+Full Kit (All-in-One),BUZZER,1
+Full Kit (All-in-One),THERMAL-PAD,2
+Full Kit (All-in-One),HEATSINK-TO220,1
+Full Kit (All-in-One),HARNESS-MAIN,1
+Full Kit (All-in-One),HARNESS-SUB,1
+Full Kit (All-in-One),GASKET-RUBBER,1
+Full Kit (All-in-One),SHIELD-METAL,1
+Full Kit (All-in-One),SCREW-M3-10,8
+Full Kit (All-in-One),SCREW-M2-8,4
+Full Kit (All-in-One),NUT-M3,12
+Full Kit (All-in-One),WASHER-M3,12
+Full Kit (All-in-One),SPACER-M3-10,4
+Full Kit (All-in-One),FOAM-PAD,1
+Full Kit (All-in-One),STICKER-LABEL,2
+Full Kit (All-in-One),BOX-LARGE,1
+Full Kit (All-in-One),FOAM-INSERT-L,1
+Full Kit (All-in-One),CABLE-USB,1
+Full Kit (All-in-One),CABLE-POWER,1
+Full Kit (All-in-One),MANUAL-BOOK,1

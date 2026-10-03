@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="panel">
+  <div class="panel-title">New quotation</div>
+  <form id="quote-form">
+    <div class="toolbar">
+      <label class="field" style="flex:1">Product
+        <select name="product_id" required>
+          {% for p in products %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="field" style="width:130px">Qty
+        <input name="qty" type="number" min="1" step="1" value="1" required>
+      </label>
+      <label class="field" style="width:170px">Customer
+        <input name="customer_name" placeholder="e.g. ABC Tyres">
+      </label>
+      <label class="field" style="width:140px">Phone
+        <input name="customer_phone">
+      </label>
+      <label class="field" style="width:150px">Unit price (₹, blank = list)
+        <input name="unit_price" type="number" min="0">
+      </label>
+      <button class="btn btn-primary" style="align-self:end" type="submit">Create quote</button>
+    </div>
+  </form>
+</div>
+
+<div class="panel">
+  <div class="panel-title">Quotations</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Quote</th><th>Customer</th><th>Product</th><th class="num">Qty</th>
+        <th class="num">Unit ₹</th><th class="num">Total</th><th>Promised</th>
+        <th>ATP-backed</th><th>Status</th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for q in quotes %}
+        <tr>
+          <td class="mono">{{ q.quote_no }}</td>
+          <td>{{ q.customer_name or "—" }}</td>
+          <td class="small">{{ q.product_name }}</td>
+          <td class="num">{{ q.qty }}</td>
+          <td class="num">{{ q.unit_price }}</td>
+          <td class="num">{{ q.total_value }}</td>
+          <td class="num">{{ q.promised_date or "—" }}</td>
+          <td>
+            {% if q.availability.buildable_from_stock %}<span class="tag ok">from stock</span>
+            {% else %}<span class="tag warn">needs {{ q.availability.max_lead_days }} d</span>{% endif %}
+          </td>
+          <td><span class="tag {{ 'ok' if q.status == 'confirmed' else 'dim' }}">{{ q.status }}</span></td>
+          <td>
+            {% if q.status in ("new", "quote_sent") %}
+            <button class="btn btn-sm btn-primary" data-confirm="{{ q.id }}">Confirm → MO</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="empty-state">No quotes yet</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+document.getElementById("quote-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  try {
+    const r = await window.manatec.api("/quotes", { method: "POST", body: {
+      product_id: +f.get("product_id"), qty: +f.get("qty"),
+      customer_name: f.get("customer_name") || "", customer_phone: f.get("customer_phone") || "",
+      unit_price: f.get("unit_price") ? +f.get("unit_price") : null,
+    }});
+    window.manatec.toast(`${r.quote_no} created — promised ${r.promised_date} (${r.availability.buildable_from_stock ? "from stock" : "needs " + r.availability.max_lead_days + " d procurement"})`);
+    setTimeout(() => location.reload(), 700);
+  } catch (err) { window.manatec.toast("Error: " + err.message, "err"); }
+});
+document.querySelectorAll("[data-confirm]").forEach(b => b.addEventListener("click", async () => {
+  try {
+    const r = await window.manatec.api(`/quotes/${+b.dataset.confirm}/confirm`, { method: "POST", body: {} });
+    window.manatec.toast(`Confirmed → ${r.order_no} created`);
+    setTimeout(() => location.reload(), 700);
+  } catch (e) { window.manatec.toast("Error: " + e.message, "err"); }
+}));
+</script>
+{% endblock %}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Avatar,
   Badge,
@@ -15,12 +15,19 @@ import {
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
+  AppstoreOutlined,
   AuditOutlined,
   BellOutlined,
   DashboardOutlined,
+  ExperimentOutlined,
+  FileTextOutlined,
+  InboxOutlined,
   LogoutOutlined,
   OrderedListOutlined,
+  PartitionOutlined,
+  ShoppingCartOutlined,
   TeamOutlined,
+  ToolOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 
@@ -33,10 +40,44 @@ import TasksPage from './pages/TasksPage';
 import NotificationsPage from './pages/NotificationsPage';
 import AdminPage from './pages/AdminPage';
 import AuditPage from './pages/AuditPage';
+import CatalogPage from './pages/CatalogPage';
+import InventoryPage from './pages/InventoryPage';
+import BOMPage from './pages/BOMPage';
+import ProcurementPage from './pages/ProcurementPage';
+import ProductionPage from './pages/ProductionPage';
+import QuotesPage from './pages/QuotesPage';
+import AnalyzerPage from './pages/AnalyzerPage';
 
 const { Header, Sider, Content } = Layout;
 
-type Page = 'dashboard' | 'tasks' | 'notifications' | 'admin' | 'audit';
+type Page =
+  | 'dashboard'
+  | 'tasks'
+  | 'notifications'
+  | 'catalog'
+  | 'inventory'
+  | 'bom'
+  | 'procurement'
+  | 'production'
+  | 'quotes'
+  | 'analyzer'
+  | 'admin'
+  | 'audit';
+
+const NAV: { key: Page; icon: ReactNode; label: string; perm: string }[] = [
+  { key: 'dashboard', icon: <DashboardOutlined />, label: 'Dashboard', perm: 'Dashboard' },
+  { key: 'tasks', icon: <OrderedListOutlined />, label: 'My Tasks', perm: 'Dashboard' },
+  { key: 'notifications', icon: <BellOutlined />, label: 'Notifications', perm: 'Notifications' },
+  { key: 'catalog', icon: <AppstoreOutlined />, label: 'Catalog', perm: 'Catalog' },
+  { key: 'inventory', icon: <InboxOutlined />, label: 'Inventory', perm: 'Inventory' },
+  { key: 'bom', icon: <PartitionOutlined />, label: 'BOM & ATP', perm: 'BOM' },
+  { key: 'procurement', icon: <ShoppingCartOutlined />, label: 'Procurement', perm: 'Purchase' },
+  { key: 'production', icon: <ToolOutlined />, label: 'Production', perm: 'Production' },
+  { key: 'quotes', icon: <FileTextOutlined />, label: 'Quotes', perm: 'Quotations' },
+  { key: 'analyzer', icon: <ExperimentOutlined />, label: 'BOM Analyzer', perm: 'Reports' },
+  { key: 'admin', icon: <TeamOutlined />, label: 'Administration', perm: 'Employees' },
+  { key: 'audit', icon: <AuditOutlined />, label: 'Audit log', perm: 'Admin' },
+];
 
 export default function AppShell() {
   const { user, signOut } = useAuth();
@@ -48,9 +89,28 @@ export default function AppShell() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
 
-  const perms = new Set(user?.permissions ?? []);
-  const has = (module: string) => Array.from(perms).some((p) => p.startsWith(`${module}:`));
-  const pagePerm = { dashboard: 'Dashboard', tasks: 'Tasks', admin: 'Employees' } as const;
+  const permKey = (user?.permissions ?? []).join(',');
+  const perms = useMemo(() => new Set(permKey ? permKey.split(',') : []), [permKey]);
+  const has = useCallback((module: string) => {
+    const prefix = `${module}:`;
+    for (const p of perms) if (p.startsWith(prefix)) return true;
+    return false;
+  }, [perms]);
+  const pagePerm: Record<Page, string> = {
+    dashboard: 'Dashboard',
+    tasks: 'Dashboard',
+    notifications: 'Notifications',
+    admin: 'Employees',
+    audit: 'Admin',
+    catalog: 'Catalog',
+    inventory: 'Inventory',
+    bom: 'BOM',
+    procurement: 'Purchase',
+    production: 'Production',
+    quotes: 'Quotations',
+    analyzer: 'Reports',
+  };
+  const visibleNav = useMemo(() => NAV.filter((n) => has(n.perm)), [has]);
 
   useEffect(() => subscribeUnread(() => setUnreadState(getUnread())), []);
 
@@ -101,12 +161,14 @@ export default function AppShell() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const menuItems: MenuProps['items'] = [];
-  if (has('Dashboard')) menuItems.push({ key: 'dashboard', icon: <DashboardOutlined />, label: 'Dashboard' });
-  if (has('Tasks')) menuItems.push({ key: 'tasks', icon: <OrderedListOutlined />, label: 'My Tasks' });
-  if (has('Notifications')) menuItems.push({ key: 'notifications', icon: <BellOutlined />, label: 'Notifications' });
-  if (has('Employees')) menuItems.push({ key: 'admin', icon: <TeamOutlined />, label: 'Administration' });
-  if (has('Admin')) menuItems.push({ key: 'audit', icon: <AuditOutlined />, label: 'Audit log' });
+  const menuItems: MenuProps['items'] = visibleNav.map(({ key, icon, label }) => ({ key, icon, label }));
+  const firstAllowed = visibleNav[0]?.key;
+
+  useEffect(() => {
+    if (firstAllowed && page !== firstAllowed && !visibleNav.some((n) => n.key === page)) {
+      setPage(firstAllowed);
+    }
+  }, [firstAllowed, page, visibleNav]);
 
   const userMenu: MenuProps['items'] = [
     {
@@ -211,6 +273,13 @@ export default function AppShell() {
           {page === 'dashboard' ? <DashboardPage /> : null}
           {page === 'tasks' ? <TasksPage /> : null}
           {page === 'notifications' ? <NotificationsPage /> : null}
+          {page === 'catalog' ? <CatalogPage /> : null}
+          {page === 'inventory' ? <InventoryPage /> : null}
+          {page === 'bom' ? <BOMPage /> : null}
+          {page === 'procurement' ? <ProcurementPage /> : null}
+          {page === 'production' ? <ProductionPage /> : null}
+          {page === 'quotes' ? <QuotesPage /> : null}
+          {page === 'analyzer' ? <AnalyzerPage /> : null}
           {page === 'admin' ? <AdminPage /> : null}
           {page === 'audit' ? <AuditPage /> : null}
         </Content>

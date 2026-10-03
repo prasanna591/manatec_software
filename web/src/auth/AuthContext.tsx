@@ -24,13 +24,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const token = window.localStorage.getItem(TOKEN_KEY);
         const cached = window.localStorage.getItem(USER_KEY);
-        if (!token) return;
-        setAccessToken(token);
-        if (cached) setUser(JSON.parse(cached) as UserProfile);
-        const fresh = await api.me();
-        setUser(fresh);
-        window.localStorage.setItem(USER_KEY, JSON.stringify(fresh));
+        if (token) {
+          setAccessToken(token);
+          if (cached) setUser(JSON.parse(cached) as UserProfile);
+          const fresh = await api.me();
+          setUser(fresh);
+          window.localStorage.setItem(USER_KEY, JSON.stringify(fresh));
+        }
       } catch {
+        // Clear invalid session
         setAccessToken(null);
         setUser(null);
         window.localStorage.removeItem(TOKEN_KEY);
@@ -45,14 +47,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       user,
       initializing,
-      async signIn(username: string, password: string) {
+      signIn: async (username: string, password: string) => {
         const res = await api.login(username.trim(), password);
         setAccessToken(res.access_token);
         setUser(res.user);
         window.localStorage.setItem(TOKEN_KEY, res.access_token);
         window.localStorage.setItem(USER_KEY, JSON.stringify(res.user));
       },
-      async signOut() {
+      signOut: async () => {
         setAccessToken(null);
         setUser(null);
         window.localStorage.removeItem(TOKEN_KEY);

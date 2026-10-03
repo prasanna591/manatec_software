@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="panel">
+  <div class="panel-title">New production order</div>
+  <form id="mo-form">
+    <div class="toolbar">
+      <label class="field" style="flex:1">Product
+        <select name="product_id" required>
+          {% for p in products %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="field" style="width:140px">Qty
+        <input name="qty" type="number" min="1" step="1" value="1" required>
+      </label>
+      <label class="field" style="width:170px">Due date
+        <input name="due_date" type="date">
+      </label>
+      <button class="btn btn-primary" style="align-self:end" type="submit">Create order</button>
+    </div>
+  </form>
+</div>
+
+<div class="panel">
+  <div class="panel-title">Production orders</div>
+  {% for o in orders %}
+  <div class="mo-block">
+    <div class="mo-head">
+      <b class="mono">{{ o.order_no }}</b>
+      <span class="tag {{ 'ok' if o.status == 'dispatched' else ('dim' if o.status == 'cancelled' else 'accent') }}">{{ o.status }}</span>
+      <a href="/bom/{{ o.product_id }}" class="small">{{ o.product_name }}</a>
+      <span class="small muted">× {{ o.qty }}</span>
+      <span class="small muted" style="margin-left:auto">due {{ o.due_date or "—" }} · {{ o.created_at }}</span>
+    </div>
+    <div class="table-wrap" style="margin-top:8px">
+      <table>
+        <thead><tr><th>Code</th><th>Description</th><th class="num">Planned</th><th class="num">Issued</th><th class="num">Pending</th></tr></thead>
+        <tbody>
+          {% for l in o.lines %}
+          <tr class="{{ 'row-short' if l.pending > 0 }}">
+            <td class="mono">{{ l.code }}</td><td>{{ l.description }}</td>
+            <td class="num">{{ l.plan_qty }}</td><td class="num">{{ l.issued_qty }}</td>
+            <td class="num"><b class="{{ 'ok' if l.pending == 0 else 'bad' }}">{{ l.pending }}</b></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="po-actions">
+      {% if o.status in ("planned", "released") %}
+      <button class="btn btn-sm" data-release="{{ o.id }}">Release</button>
+      {% endif %}
+      {% if o.status in ("planned", "released", "in_production") %}
+      <button class="btn btn-sm btn-primary" data-issue="{{ o.id }}">Issue remaining material</button>
+      {% endif %}
+      {% if o.status in ("released", "in_production") %}
+      <button class="btn btn-sm" data-status="{{ o.id }}" data-to="packed">Mark packed</button>
+      <button class="btn btn-sm" data-status="{{ o.id }}" data-to="dispatched">Dispatch</button>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="empty-state">No production orders yet</div>
+  {% endfor %}
+</div>
+
+<style>
+  .mo-block { border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 16px; }
+  .mo-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .po-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+</style>
+
+<script>
+document.getElementById("mo-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  try {
+    const r = await window.manatec.api("/production-orders", {
+      method: "POST",
+      body: { product_id: +f.get("product_id"), qty: +f.get("qty"),
+              due_date: f.get("due_date") || null },
+    });
+    window.manatec.toast(`${r.order_no} created — ${r.lines.length} material lines planned`);
+    setTimeout(() => location.reload(), 700);
+  } catch (err) { window.manatec.toast("Error: " + err.message, "err"); }
+});
+document.querySelectorAll("[data-release]").forEach(b => b.addEventListener("click", async () => {
+  try { await window.manatec.api(`/production-orders/${+b.dataset.release}/release`, { method: "POST", body: {} }); window.manatec.toast("Released"); setTimeout(() => location.reload(), 600); }
+  catch (e) { window.manatec.toast("Error: " + e.message, "err"); }
+}));
+document.querySelectorAll("[data-issue]").forEach(b => b.addEventListener("click", async () => {
+  try { const r = await window.manatec.api(`/production-orders/${+b.dataset.issue}/issue-material`, { method: "POST", body: {} }); window.manatec.toast(`Issued ${r.issued.length} lines`); setTimeout(() => location.reload(), 600); }
+  catch (e) { window.manatec.toast("Error: " + e.message, "err"); }
+}));
+document.querySelectorAll("[data-status]").forEach(b => b.addEventListener("click", async () => {
+  try { await window.manatec.api(`/production-orders/${+b.dataset.status}/status`, { method: "POST", body: { status: b.dataset.to } }); window.manatec.toast("Status updated"); setTimeout(() => location.reload(), 600); }
+  catch (e) { window.manatec.toast("Error: " + e.message, "err"); }
+}));
+</script>
+{% endblock %}

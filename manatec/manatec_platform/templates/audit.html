@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="panel">
+  <div class="panel-title">Audit trail (last 200)</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>When</th><th>User</th><th>Action</th><th>Entity</th><th class="num">ID</th><th>Details</th></tr></thead>
+      <tbody>
+        {% for a in rows %}
+        <tr>
+          <td class="small">{{ a.created_at }}</td>
+          <td class="small">{{ a.username or "—" }}</td>
+          <td><span class="tag dim">{{ a.action }}</span></td>
+          <td class="small">{{ a.entity }}</td>
+          <td class="num">{{ a.entity_id }}</td>
+          <td class="small muted">
+            {%- for k, v in a.details.items() %}{{ k }}={{ v }} {% endfor -%}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="empty-state">No audit rows</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

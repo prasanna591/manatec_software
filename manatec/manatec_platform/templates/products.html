@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="toolbar">
+  <form method="get" action="/products" style="display:flex;gap:10px;flex:1">
+    <input name="q" value="{{ q }}" placeholder="Search products by name…">
+    <button class="btn" type="submit">Search</button>
+  </form>
+  <span class="count-hint">{{ total }} products</span>
+</div>
+
+<div class="grid2">
+  {% for p in products %}
+  <div class="product">
+    <a href="/products/{{ p.id }}" style="display:block">
+      <div class="product-head">
+        {% if p.image_url %}
+        <img class="product-thumb" src="{{ p.image_url }}" loading="lazy" referrerpolicy="no-referrer" alt="">
+        {% else %}
+        <div class="product-thumb product-thumb-ph">{{ p.name[0] }}</div>
+        {% endif %}
+        <div class="product-id">
+          <div class="product-cat">{{ p.family_name or p.category or "—" }}</div>
+          <div class="product-name">{{ p.name }}</div>
+          <div class="product-price">{{ p.price_raw or (p.price_value | inr) }}</div>
+        </div>
+      </div>
+    </a>
+  </div>
+  {% else %}
+  <div class="empty-state">No products found</div>
+  {% endfor %}
+</div>
+{% endblock %}
