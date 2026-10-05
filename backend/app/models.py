@@ -566,3 +566,199 @@ class CompanyNotice(Base):
     body: Mapped[str] = mapped_column(Text, default="")
     posted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+# --- COMMON · VISITS (company-wide register, FRS 14) -----------------------
+#
+# A visit is not a gate log: it is a workflow. Any employee may raise one, the
+# host confirms it, the visitor is tracked to the gate, the meeting happens, and
+# closing the visit produces an outcome plus a follow-up task. That makes
+# "Supplier visit on 8 Oct" traceable instead of a line in a register.
+
+
+class Visit(Base):
+    """One external visitor from invitation to closed outcome.
+
+    `visit_type` decides who is accountable for the outcome: a supplier visit is
+    a sourcing conversation, a buyer visit is a commercial/technical one, and a
+    vendor visit is a service or installation job. The workflow itself is shared.
+    """
+
+    __tablename__ = "visits"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    visit_no: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    visit_type: Mapped[str] = mapped_column(
+        String(16), index=True
+    )  # supplier/customer/buyer/vendor/guest/official/other
+    visitor_name: Mapped[str] = mapped_column(String(128))
+    company: Mapped[str] = mapped_column(String(160), default="", index=True)
+    contact: Mapped[str] = mapped_column(String(40), default="")
+    purpose: Mapped[str] = mapped_column(Text, default="")
+    requirement: Mapped[str] = mapped_column(Text, default="")
+
+    host_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"), nullable=True, index=True)
+
+    visit_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    expected_time: Mapped[str] = mapped_column(String(8), default="")
+
+    food_arrangement: Mapped[str] = mapped_column(String(24), default="none")
+    # none / refreshments / lunch / dinner / full_meals / veg_meals
+    transport_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    vehicle_no: Mapped[str] = mapped_column(String(32), default="")
+    location_note: Mapped[str] = mapped_column(String(200), default="")
+    attachments: Mapped[list] = mapped_column(JSON, default=list)
+
+    status: Mapped[str] = mapped_column(
+        String(16), default="created", index=True
+    )  # created→confirmed→on_the_way→arrived→meeting→follow_up→completed / cancelled
+
+    # Buyer/visitor tracking. Coordinates are only ever surfaced to roles holding
+    # `BuyerTracking:view`, so a production operator cannot read a customer's
+    # whereabouts even though they can see that the visit exists.
+    tracking_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    eta_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_note_tracking: Mapped[str] = mapped_column(String(200), default="")
+    location_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Outcome captured at close — drives the follow-up task.
+    outcome_requirement: Mapped[bool] = mapped_column(Boolean, default=False)
+    outcome_sample: Mapped[bool] = mapped_column(Boolean, default=False)
+    outcome_purchase: Mapped[bool] = mapped_column(Boolean, default=False)
+    outcome_followup: Mapped[bool] = mapped_column(Boolean, default=False)
+    next_action: Mapped[str] = mapped_column(String(200), default="")
+    followup_due: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    arrived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    meeting_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class VisitNote(Base):
+    """Timestamped note on a visit — decisions, requirements, photos-by-link."""
+
+    __tablename__ = "visit_notes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    visit_id: Mapped[int] = mapped_column(ForeignKey("visits.id", ondelete="CASCADE"), index=True)
+    author_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+# --- QUALITY · INSPECTION + NCR (FRS 11) -----------------------------------
+
+
+class Inspection(Base):
+    """Incoming / in-process / final inspection with a stored checklist.
+
+    A failed check is not just a red row: it raises an NCR so the failure has an
+    owner, a root cause and a corrective action, and it re-enters production as a
+    task instead of disappearing when the inspector walks away.
+    """
+
+    __tablename__ = "inspections"
+    __table_args__ = (UniqueConstraint("insp_no", name="uq_insp_no"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    insp_no: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    kind: Mapped[str] = mapped_column(
+        String(16), index=True
+    )  # incoming / in_process / final
+    ref_type: Mapped[str] = mapped_column(String(32), default="")  # grn / production_order / dispatch
+    ref_no: Mapped[str] = mapped_column(String(64), default="", index=True)
+    product_name: Mapped[str] = mapped_column(String(200), default="")
+    serial_no: Mapped[str] = mapped_column(String(64), default="")
+    qty: Mapped[int] = mapped_column(Integer, default=1)
+    result: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    # pending → pass / fail / rework
+    severity: Mapped[str] = mapped_column(String(16), default="minor")  # minor/major/critical
+    checklist: Mapped[list] = mapped_column(JSON, default=list)
+    remarks: Mapped[str] = mapped_column(Text, default="")
+    ncr_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    inspector_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    inspector_name: Mapped[str] = mapped_column(String(128), default="")
+    inspected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class Ncr(Base):
+    """Non-conformance report: open → root cause → corrective action → verify → close."""
+
+    __tablename__ = "ncrs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ncr_no: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    issue: Mapped[str] = mapped_column(Text, default="")
+    detected_at: Mapped[str] = mapped_column(String(32), default="")  # inspection stage
+    ref_no: Mapped[str] = mapped_column(String(64), default="", index=True)
+    severity: Mapped[str] = mapped_column(String(16), default="minor", index=True)
+    status: Mapped[str] = mapped_column(
+        String(16), default="open", index=True
+    )  # open/investigating/corrective/verification/closed/rejected
+    assigned_to: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"), nullable=True)
+    qty_affected: Mapped[int] = mapped_column(Integer, default=0)
+    root_cause: Mapped[str] = mapped_column(Text, default="")
+    corrective_action: Mapped[str] = mapped_column(Text, default="")
+    preventive_action: Mapped[str] = mapped_column(Text, default="")
+    verification: Mapped[str] = mapped_column(Text, default="")
+    due_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+# --- MACHINES · MACHINE SHOP (FRS 7.2) -------------------------------------
+
+
+class Machine(Base):
+    """A CNC / machine-shop asset. Status is what the floor actually sees."""
+
+    __tablename__ = "machines"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    work_center: Mapped[str] = mapped_column(String(64), default="", index=True)
+    # running/idle/setup/maintenance/down/offline
+    status: Mapped[str] = mapped_column(String(16), default="idle", index=True)
+    current_job: Mapped[str] = mapped_column(String(64), default="", index=True)
+    part_no: Mapped[str] = mapped_column(String(64), default="")
+    operator_name: Mapped[str] = mapped_column(String(128), default="")
+    job_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    est_completion: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    utilization_pct: Mapped[float] = mapped_column(Float, default=0)
+    tool_life_pct: Mapped[float] = mapped_column(Float, default=100)
+    oee_pct: Mapped[float] = mapped_column(Float, default=0)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class MachineDowntime(Base):
+    """One stop event. Reasons are a fixed list so downtime analytics aggregate."""
+
+    __tablename__ = "machine_downtimes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    machine_id: Mapped[int] = mapped_column(ForeignKey("machines.id", ondelete="CASCADE"), index=True)
+    reason: Mapped[str] = mapped_column(String(32), index=True)
+    # tool_breakage/material_unavailable/machine_fault/setup/maintenance/
+    # power_failure/operator_unavailable/quality_issue/other
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    minutes: Mapped[int] = mapped_column(Integer, default=0)
+    resolution: Mapped[str] = mapped_column(Text, default="")
+    reported_by: Mapped[str] = mapped_column(String(64), default="")
+    reported_role: Mapped[str] = mapped_column(String(16), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

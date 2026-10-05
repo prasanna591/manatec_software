@@ -1,33 +1,41 @@
 import { useCallback, useState } from 'react';
-import {
-  ActivityIndicator,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '../api/client';
 import type { DashboardKpis, Notification, Task } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
-import { colors, priorityColor, spacing } from '../theme';
+import { messageOf } from '../auth/session';
+import {
+  Badge,
+  Button,
+  Card,
+  Divider,
+  ErrorBanner,
+  Meter,
+  PriorityChip,
+  ScreenSkeleton,
+  SectionHeader,
+} from '../components/ui';
+import { ripple } from '../motion';
+import { colors, radius, spacing, typography, withAlpha } from '../theme';
 import { setUnread } from '../unread';
 
 function greeting(): string {
   const h = new Date().getHours();
-  if (h < 12) return 'Good Morning';
-  if (h < 17) return 'Good Afternoon';
-  return 'Good Evening';
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
 }
 
 const isOpen = (t: Task) => t.status === 'open' || t.status === 'in_progress';
 
 export default function HomeScreen() {
-  const { user } = useAuth();
+  const { user, isInRole } = useAuth();
   const navigation = useNavigation<any>();
+  const isManager = isInRole(['ADMIN', 'MGMT', 'DH']);
+
   const [kpis, setKpis] = useState<DashboardKpis | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [alerts, setAlerts] = useState<Notification[]>([]);
@@ -48,7 +56,7 @@ export default function HomeScreen() {
       setAlerts(notifications);
       setUnread(notifications.length);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load');
+      setError(messageOf(e, 'Failed to load your dashboard'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -57,194 +65,222 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      load();
+      void load();
     }, [load]),
   );
 
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    load();
-  }, [load]);
-
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
-  }
+  if (loading) return <ScreenSkeleton label="Loading your dashboard" tiles={4} cards={2} />;
 
   const openTasks = tasks.filter(isOpen);
   const approvals = openTasks.filter((t) => t.type === 'approval');
-  const current =
-    openTasks.find((t) => t.status === 'in_progress') ?? openTasks[0] ?? null;
-  const urgent = alerts.filter((n) => n.priority === 'critical' || n.priority === 'urgent');
+  const current = openTasks.find((t) => t.status === 'in_progress') ?? openTasks[0] ?? null;
+  const urgent = alerts.filter(
+    (n) => n.priority === 'critical' || n.priority === 'urgent',
+  );
+  const firstName = (user?.employee?.name ?? user?.username ?? '').split(' ')[0];
 
   return (
     <ScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-    >
-      <Text style={styles.greeting}>
-        {greeting()}, {user?.employee?.name ?? user?.username}
-      </Text>
-      <Text style={styles.subtle}>
-        {user?.role} · {user?.employee?.code ?? '—'}
-      </Text>
-
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-
-      <Text style={styles.sectionLabel}>TODAY</Text>
-      <View style={styles.kpiRow}>
-        <Kpi label="My Tasks" value={openTasks.length} onPress={() => navigation.navigate('Tasks')} />
-        <Kpi label="Approvals" value={approvals.length} onPress={() => navigation.navigate('Tasks')} />
-        <Kpi
-          label="Notifications"
-          value={alerts.length}
-          onPress={() => navigation.navigate('Notifications')}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          tintColor={colors.primary}
+          onRefresh={() => {
+            setRefreshing(true);
+            void load();
+          }}
         />
+      }
+    >
+      <View style={styles.hero}>
+        <Text style={styles.greeting}>
+          {greeting()}
+          {firstName ? `, ${firstName}` : ''}
+        </Text>
+        <Text style={styles.subtle}>
+          {user?.role} · {user?.employee?.code ?? user?.username}
+        </Text>
+
+        <View style={styles.kpiRow}>
+          <Pressable
+            style={styles.kpi}
+            onPress={() => navigation.navigate('Tasks')}
+            accessibilityRole="button"
+            accessibilityLabel={`Open tasks: ${openTasks.length}`}
+            accessibilityHint="Goes to your task list"
+            {...ripple(colors.primary)}
+          >
+            <Text style={styles.kpiValue}>{openTasks.length}</Text>
+            <Text style={styles.kpiLabel}>Open tasks</Text>
+          </Pressable>
+          <Pressable
+            style={styles.kpi}
+            onPress={() => navigation.navigate('Tasks')}
+            accessibilityRole="button"
+            accessibilityLabel={`Approvals waiting: ${approvals.length}`}
+            accessibilityHint="Goes to your task list, filtered to approvals"
+            {...ripple(colors.primary)}
+          >
+            <Text style={[styles.kpiValue, approvals.length > 0 && styles.kpiAlert]}>
+              {approvals.length}
+            </Text>
+            <Text style={styles.kpiLabel}>Approvals</Text>
+          </Pressable>
+          <Pressable
+            style={styles.kpi}
+            onPress={() => navigation.navigate('Notifications')}
+            accessibilityRole="button"
+            accessibilityLabel={`Unread notifications: ${alerts.length}`}
+            accessibilityHint="Goes to your notifications"
+            {...ripple(colors.primary)}
+          >
+            <Text style={[styles.kpiValue, alerts.length > 0 && styles.kpiAlert]}>
+              {alerts.length}
+            </Text>
+            <Text style={styles.kpiLabel}>Unread</Text>
+          </Pressable>
+        </View>
       </View>
 
-      <Text style={styles.sectionLabel}>CURRENT TASK</Text>
-      <View style={styles.card}>
+      {error ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
+
+      <SectionHeader label={current ? 'In progress' : 'Your work'} />
+      <Card style={styles.card}>
         {current ? (
           <>
-            <Text style={styles.cardTitle}>{current.title}</Text>
+            <View style={styles.taskTop}>
+              <Text style={styles.cardTitle} numberOfLines={2}>
+                {current.title}
+              </Text>
+              <PriorityChip priority={current.priority} />
+            </View>
             {current.description ? (
-              <Text style={styles.cardBody}>{current.description}</Text>
+              <Text style={styles.cardBody} numberOfLines={3}>
+                {current.description}
+              </Text>
             ) : null}
             <View style={styles.metaRow}>
-              <Text style={styles.meta}>
-                {current.source_ref ? `Ref ${current.source_ref} · ` : ''}
-                {current.status.replace('_', ' ')}
-              </Text>
-              <Text style={[styles.meta, { color: priorityColor[current.priority] ?? colors.muted }]}>
-                {current.priority}
-              </Text>
+              <Badge
+                label={current.status.replace('_', ' ').toUpperCase()}
+                color={current.status === 'in_progress' ? colors.info : colors.muted}
+              />
+              {current.source_ref ? (
+                <Text style={typography.caption}>{current.source_ref}</Text>
+              ) : null}
             </View>
-            <TouchableOpacity
-              style={styles.action}
+            <Button
+              label="Update progress"
+              compact
+              style={styles.taskBtn}
               onPress={() => navigation.navigate('Tasks')}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.actionText}>UPDATE PROGRESS</Text>
-            </TouchableOpacity>
+            />
           </>
         ) : (
-          <Text style={styles.cardBody}>No tasks assigned. You are all caught up.</Text>
+          <View style={styles.allClear}>
+            <Ionicons name="checkmark-circle" size={28} color={colors.ok} />
+            <Text style={styles.allClearText}>Nothing assigned. You are all caught up.</Text>
+          </View>
         )}
-      </View>
+      </Card>
 
-      <Text style={styles.sectionLabel}>URGENT</Text>
-      <View style={styles.card}>
-        {urgent.length === 0 ? (
-          <Text style={styles.cardBody}>Nothing urgent right now.</Text>
-        ) : (
-          urgent.map((n) => (
-            <View key={n.id} style={styles.urgentRow}>
-              <View style={styles.dot} />
-              <Text style={styles.urgentText}>
-                {n.title}
-                {n.entity_ref ? `  (${n.entity_ref})` : ''}
-              </Text>
-            </View>
-          ))
-        )}
-      </View>
+      {urgent.length > 0 ? (
+        <>
+          <SectionHeader label={`Urgent (${urgent.length})`} />
+          <Card style={styles.card}>
+            {urgent.map((n, i) => (
+              <View key={n.id}>
+                {i > 0 ? <Divider /> : null}
+                <View style={styles.urgentRow}>
+                  <View style={styles.dot} />
+                  <Text style={styles.urgentText} numberOfLines={2}>
+                    {n.title}
+                    {n.entity_ref ? ` (${n.entity_ref})` : ''}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </Card>
+        </>
+      ) : null}
 
-      <Text style={styles.sectionLabel}>PLANT PULSE</Text>
-      <View style={styles.card}>
-        <Pulse label="Production completion" value={`${kpis?.production_pct ?? 0}%`} />
-        <Pulse label="Inventory health" value={`${kpis?.inventory_pct ?? 0}%`} />
-        <Pulse label="Open orders" value={`${kpis?.orders_open ?? 0} / ${kpis?.orders ?? 0}`} />
-        <Pulse label="Delayed orders" value={`${kpis?.delayed_orders ?? 0}`} />
-        <Pulse label="Material alerts" value={`${kpis?.material_alerts ?? 0}`} />
-      </View>
+      <SectionHeader label={isManager ? 'Plant pulse' : 'Plant pulse (read-only)'} />
+      <Card style={styles.card}>
+        <Pulse label="Production completion" value={kpis?.production_pct ?? 0} suffix="%" />
+        <Pulse label="Inventory health" value={kpis?.inventory_pct ?? 0} suffix="%" />
+        <View style={styles.pulseRow}>
+          <Text style={styles.pulseLabel}>Open orders</Text>
+          <Text style={styles.pulseValue}>
+            {kpis?.orders_open ?? 0} / {kpis?.orders ?? 0}
+          </Text>
+        </View>
+        <Pulse label="Delayed orders" value={kpis?.delayed_orders ?? 0} />
+        <Pulse label="Material alerts" value={kpis?.material_alerts ?? 0} />
+        {!isManager ? (
+          <Text style={styles.readOnlyNote}>
+            Plant-wide figures are informational for your role.
+          </Text>
+        ) : null}
+      </Card>
     </ScrollView>
   );
 }
 
-function Kpi({ label, value, onPress }: { label: string; value: number; onPress: () => void }) {
+function Pulse({ label, value, suffix = '%' }: { label: string; value: number; suffix?: string }) {
   return (
-    <TouchableOpacity style={styles.kpi} onPress={onPress} activeOpacity={0.7}>
-      <Text style={styles.kpiValue}>{value}</Text>
-      <Text style={styles.kpiLabel}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
-function Pulse({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.pulseRow}>
-      <Text style={styles.pulseLabel}>{label}</Text>
-      <Text style={styles.pulseValue}>{value}</Text>
+    <View style={styles.pulseBlock}>
+      <Meter
+        label={label}
+        value={value}
+        suffix={suffix}
+        tone={value >= 90 ? colors.ok : value >= 70 ? colors.warn : colors.danger}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  content: { padding: spacing.lg, paddingBottom: spacing.xl },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
-  greeting: { fontSize: 22, fontWeight: '700', color: colors.text },
-  subtle: { color: colors.muted, marginTop: 2, marginBottom: spacing.md },
-  error: { color: colors.danger, marginBottom: spacing.md },
-  sectionLabel: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1,
-    marginTop: spacing.lg,
-    marginBottom: spacing.sm,
+  content: { padding: spacing.md, paddingBottom: spacing.xxl },
+  hero: {
+    backgroundColor: colors.primaryDeep,
+    borderRadius: radius.xl,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
   },
-  kpiRow: { flexDirection: 'row', gap: spacing.md },
+  greeting: { ...typography.title, color: '#ffffff' },
+  subtle: { fontSize: 13, color: withAlpha('#ffffff', 0.75), marginTop: 2 },
+  kpiRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
   kpi: {
     flex: 1,
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    paddingVertical: spacing.lg,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  kpiValue: { fontSize: 26, fontWeight: '700', color: colors.primary },
-  kpiLabel: { color: colors.muted, fontSize: 12, marginTop: spacing.xs },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  cardTitle: { fontSize: 17, fontWeight: '700', color: colors.text },
-  cardBody: { color: colors.muted, marginTop: spacing.xs, fontSize: 14 },
-  metaRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.md },
-  meta: { color: colors.muted, fontSize: 13, textTransform: 'capitalize' },
-  action: {
-    marginTop: spacing.lg,
-    backgroundColor: colors.primary,
-    borderRadius: 10,
+    backgroundColor: withAlpha('#ffffff', 0.12),
+    borderRadius: radius.md,
     paddingVertical: spacing.md,
     alignItems: 'center',
   },
-  actionText: { color: '#fff', fontWeight: '700', letterSpacing: 0.5 },
-  urgentRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.danger,
-    marginRight: spacing.sm,
-  },
-  urgentText: { color: colors.text, flex: 1, fontSize: 14 },
+  kpiValue: { fontSize: 24, fontWeight: '800', color: '#ffffff' },
+  kpiAlert: { color: withAlpha(colors.warn, 1) },
+  kpiLabel: { fontSize: 11, color: withAlpha('#ffffff', 0.75), marginTop: 2 },
+  card: { marginBottom: spacing.md },
+  taskTop: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  cardTitle: { ...typography.body, fontWeight: '700', fontSize: 15, flex: 1 },
+  cardBody: { ...typography.bodyMuted, marginTop: 6 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
+  taskBtn: { marginTop: spacing.lg },
+  allClear: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.md },
+  allClearText: { ...typography.bodyMuted, textAlign: 'center' },
+  urgentRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.danger },
+  urgentText: { ...typography.body, flex: 1 },
+  pulseBlock: { marginBottom: spacing.md },
   pulseRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    alignItems: 'center',
+    marginBottom: 6,
   },
-  pulseLabel: { color: colors.muted, fontSize: 14 },
-  pulseValue: { color: colors.text, fontWeight: '700', fontSize: 14 },
+  pulseLabel: { ...typography.caption, fontSize: 13 },
+  pulseValue: { ...typography.body, fontWeight: '700' },
+  readOnlyNote: { ...typography.caption, color: colors.warn, marginTop: spacing.sm },
 });

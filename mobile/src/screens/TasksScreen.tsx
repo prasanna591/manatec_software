@@ -1,18 +1,21 @@
-import { useCallback, useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { api } from '../api/client';
 import type { Task, TaskStatus } from '../api/types';
-import { colors, priorityColor, spacing } from '../theme';
+import { messageOf } from '../auth/session';
+import {
+  Badge,
+  Button,
+  Card,
+  Chip,
+  EmptyState,
+  ErrorBanner,
+  PriorityChip,
+  ScreenSkeleton,
+} from '../components/ui';
+import { colors, formatDate, spacing, typography } from '../theme';
 
 type Filter = 'active' | 'all' | 'done';
 
@@ -22,12 +25,19 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: 'done', label: 'Done' },
 ];
 
-function dueLabel(due: string | null): string {
-  if (!due) return 'No due date';
+const STATUS_TONE: Record<TaskStatus, string> = {
+  open: colors.muted,
+  in_progress: colors.info,
+  done: colors.ok,
+  cancelled: colors.danger,
+};
+
+function dueMeta(due: string | null): { text: string; overdue: boolean } {
+  if (!due) return { text: 'No due date', overdue: false };
   const d = new Date(due);
   const today = new Date();
   const overdue = d.getTime() < today.getTime() && d.toDateString() !== today.toDateString();
-  return `${overdue ? 'Overdue · ' : 'Due '}${d.toLocaleDateString()}`;
+  return { text: `${overdue ? 'Overdue' : 'Due'} ${formatDate(due)}`, overdue };
 }
 
 export default function TasksScreen() {
@@ -43,7 +53,7 @@ export default function TasksScreen() {
       setError(null);
       setTasks(await api.myTasks());
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load tasks');
+      setError(messageOf(e, 'Failed to load tasks'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -52,155 +62,164 @@ export default function TasksScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      load();
+      void load();
     }, [load]),
   );
 
-  const changeStatus = useCallback(
-    async (task: Task, status: TaskStatus) => {
-      setBusyId(task.id);
-      try {
-        const updated = await api.setTaskStatus(task.id, status);
-        setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Update failed');
-      } finally {
-        setBusyId(null);
-      }
-    },
-    [],
+  const changeStatus = useCallback(async (task: Task, status: TaskStatus) => {
+    setBusyId(task.id);
+    setError(null);
+    try {
+      const updated = await api.setTaskStatus(task.id, status);
+      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    } catch (e) {
+      setError(messageOf(e, 'Could not update the task'));
+    } finally {
+      setBusyId(null);
+    }
+  }, []);
+
+  const counts = useMemo(
+    () => ({
+      all: tasks.length,
+      active: tasks.filter((t) => t.status === 'open' || t.status === 'in_progress').length,
+      done: tasks.filter((t) => t.status === 'done').length,
+    }),
+    [tasks],
   );
 
-  const visible = tasks.filter((t) => {
-    if (filter === 'active') return t.status === 'open' || t.status === 'in_progress';
-    if (filter === 'done') return t.status === 'done';
-    return true;
-  });
+  const visible = useMemo(() => {
+    if (filter === 'active') return tasks.filter((t) => t.status === 'open' || t.status === 'in_progress');
+    if (filter === 'done') return tasks.filter((t) => t.status === 'done');
+    return tasks;
+  }, [tasks, filter]);
+
+  if (loading) return <ScreenSkeleton label="Loading your tasks" rows={5} />;
 
   return (
     <View style={styles.screen}>
       <View style={styles.tabs}>
         {FILTERS.map((f) => (
-          <TouchableOpacity
+          <Chip
             key={f.key}
-            style={[styles.tab, filter === f.key && styles.tabActive]}
+            label={`${f.label} (${counts[f.key]})`}
+            accessibilityLabel={`${f.label}, ${counts[f.key]} tasks`}
+            active={filter === f.key}
             onPress={() => setFilter(f.key)}
-          >
-            <Text style={[styles.tabText, filter === f.key && styles.tabTextActive]}>
-              {f.label}
-            </Text>
-          </TouchableOpacity>
+          />
         ))}
       </View>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={colors.primary} />
+      {error ? (
+        <View style={styles.bannerWrap}>
+          <ErrorBanner message={error} onRetry={() => void load()} />
         </View>
-      ) : (
-        <FlatList
-          data={visible}
-          keyExtractor={(t) => String(t.id)}
-          contentContainerStyle={styles.list}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                load();
-              }}
-            />
-          }
-          ListEmptyComponent={<Text style={styles.empty}>No tasks here.</Text>}
-          renderItem={({ item }) => (
-            <View style={styles.card}>
+      ) : null}
+
+      <FlatList
+        data={visible}
+        keyExtractor={(t) => String(t.id)}
+        contentContainerStyle={styles.list}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            tintColor={colors.primary}
+            onRefresh={() => {
+              setRefreshing(true);
+              void load();
+            }}
+          />
+        }
+        ListEmptyComponent={
+          <EmptyState
+            title="No tasks here"
+            hint={filter === 'active' ? 'Nothing outstanding. Enjoy the calm.' : 'Nothing in this view yet.'}
+          />
+        }
+        renderItem={({ item }) => {
+          const due = dueMeta(item.due_date);
+          return (
+            <Card style={styles.card}>
               <View style={styles.cardHeader}>
-                <Text style={styles.title}>{item.title}</Text>
-                <Text style={[styles.priority, { color: priorityColor[item.priority] ?? colors.muted }]}>
-                  {item.priority}
+                <Text style={styles.title} numberOfLines={2}>
+                  {item.title}
                 </Text>
+                <View style={styles.badges}>
+                  <PriorityChip priority={item.priority} />
+                  <Badge label={item.status.replace('_', ' ')} color={STATUS_TONE[item.status]} />
+                </View>
               </View>
-              {item.description ? <Text style={styles.body}>{item.description}</Text> : null}
-              <Text style={styles.meta}>
-                {item.type.replace('_', ' ')}
-                {item.source_ref ? ` · ${item.source_ref}` : ''} · {dueLabel(item.due_date)}
-              </Text>
+
+              {item.description ? (
+                <Text style={styles.body} numberOfLines={3}>
+                  {item.description}
+                </Text>
+              ) : null}
+
+              <View style={styles.metaRow}>
+                <Text style={styles.meta}>{item.type.replace(/_/g, ' ')}</Text>
+                {item.source_ref ? (
+                  <>
+                    <Text style={styles.metaDot}>·</Text>
+                    <Text style={styles.meta}>{item.source_ref}</Text>
+                  </>
+                ) : null}
+                <Text style={styles.metaDot}>·</Text>
+                <Text style={[styles.meta, due.overdue && styles.overdue]}>{due.text}</Text>
+              </View>
 
               <View style={styles.actions}>
                 {item.status !== 'in_progress' && item.status !== 'done' ? (
-                  <TouchableOpacity
-                    style={[styles.btn, styles.btnPrimary]}
+                  <Button
+                    label="Start"
+                    variant="secondary"
+                    compact
+                    style={styles.flex}
                     disabled={busyId === item.id}
-                    onPress={() => changeStatus(item, 'in_progress')}
-                  >
-                    <Text style={styles.btnPrimaryText}>Start</Text>
-                  </TouchableOpacity>
+                    onPress={() => void changeStatus(item, 'in_progress')}
+                  />
                 ) : null}
                 {item.status !== 'done' ? (
-                  <TouchableOpacity
-                    style={[styles.btn, styles.btnOk]}
+                  <Button
+                    label="Complete"
+                    compact
+                    style={styles.flex}
                     disabled={busyId === item.id}
-                    onPress={() => changeStatus(item, 'done')}
-                  >
-                    <Text style={styles.btnOkText}>Complete</Text>
-                  </TouchableOpacity>
+                    onPress={() => void changeStatus(item, 'done')}
+                  />
                 ) : (
-                  <TouchableOpacity
-                    style={[styles.btn, styles.btnGhost]}
+                  <Button
+                    label="Reopen"
+                    variant="secondary"
+                    compact
+                    style={styles.flex}
                     disabled={busyId === item.id}
-                    onPress={() => changeStatus(item, 'open')}
-                  >
-                    <Text style={styles.btnGhostText}>Reopen</Text>
-                  </TouchableOpacity>
+                    onPress={() => void changeStatus(item, 'open')}
+                  />
                 )}
               </View>
-            </View>
-          )}
-        />
-      )}
+            </Card>
+          );
+        }}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  flex: { flex: 1 },
   tabs: { flexDirection: 'row', padding: spacing.md, gap: spacing.sm },
-  tab: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    borderRadius: 20,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  tabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  tabText: { color: colors.muted, fontWeight: '600' },
-  tabTextActive: { color: '#fff' },
-  list: { padding: spacing.md, paddingTop: 0 },
-  empty: { textAlign: 'center', color: colors.muted, marginTop: spacing.xl },
-  error: { color: colors.danger, paddingHorizontal: spacing.md },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  title: { flex: 1, fontSize: 16, fontWeight: '700', color: colors.text },
-  priority: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase', marginLeft: spacing.sm },
-  body: { color: colors.muted, marginTop: spacing.xs },
-  meta: { color: colors.muted, fontSize: 12, marginTop: spacing.sm, textTransform: 'capitalize' },
-  actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
-  btn: { paddingVertical: spacing.sm, paddingHorizontal: spacing.lg, borderRadius: 8 },
-  btnPrimary: { backgroundColor: colors.primarySoft },
-  btnPrimaryText: { color: colors.primaryDark, fontWeight: '700' },
-  btnOk: { backgroundColor: colors.okSoft },
-  btnOkText: { color: colors.ok, fontWeight: '700' },
-  btnGhost: { backgroundColor: colors.bg },
-  btnGhostText: { color: colors.muted, fontWeight: '700' },
+  bannerWrap: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
+  list: { padding: spacing.md, paddingTop: 0, paddingBottom: spacing.xxl },
+  card: { marginBottom: spacing.md },
+  cardHeader: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
+  title: { ...typography.body, fontWeight: '700', flex: 1, fontSize: 15 },
+  badges: { alignItems: 'flex-end', gap: 6 },
+  body: { ...typography.bodyMuted, marginTop: 6 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: spacing.sm, flexWrap: 'wrap' },
+  meta: { ...typography.caption, textTransform: 'capitalize' },
+  metaDot: { ...typography.caption },
+  overdue: { color: colors.danger, fontWeight: '700' },
+  actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
 });

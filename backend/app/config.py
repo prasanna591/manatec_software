@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     token_expire_hours: int = 8          # FRS 5.3 access token
     refresh_expire_days: int = 14        # FRS 5.3 refresh token
-    mock_erp_items: int = 12             # size of mock ERP catalogue
+    mock_erp_items: int = 54             # size of mock ERP catalogue (real captured components)
     sync_interval_minutes: int = 15      # FRS 18.5 stock default
     seed_demo: bool = True               # demo users/tasks for the UI-first phase
 

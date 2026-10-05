@@ -2,12 +2,44 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Literal
 
 from sqlalchemy.orm import Session
 
 from . import atp_service, bom_service
 from .mfg_helpers import audit, items_map, post_ledger
 from .models import Item, ProdOrderLine, Product, ProductionOrder, Quote, User
+
+
+# State machine definition
+ProductionStatus = Literal[
+    "draft",
+    "planned",
+    "released",
+    "in_production",
+    "qc",
+    "packed",
+    "dispatched",
+    "cancelled",
+    "on_hold",
+]
+
+# Valid transitions: current_status -> list of allowed next statuses
+VALID_TRANSITIONS: dict[ProductionStatus, list[ProductionStatus]] = {
+    "draft": ["planned", "cancelled"],
+    "planned": ["released", "cancelled", "on_hold"],
+    "released": ["in_production", "planned", "cancelled", "on_hold"],
+    "in_production": ["qc", "released", "cancelled", "on_hold"],
+    "qc": ["packed", "in_production", "cancelled", "on_hold"],
+    "packed": ["dispatched", "qc", "cancelled", "on_hold"],
+    "dispatched": ["cancelled"],  # rarely, for returns
+    "on_hold": ["planned", "released", "in_production", "qc", "packed", "cancelled"],
+    "cancelled": [],
+}
+
+
+def can_transition(current: str, nxt: str) -> bool:
+    return nxt in VALID_TRANSITIONS.get(current, [])
 
 
 def gen_order_no(db: Session) -> str:
@@ -36,7 +68,7 @@ def create_production_order(
         product_id=product_id,
         qty=qty,
         due_date=due_date,
-        status="planned",
+        status="draft",  # start as draft
         source_quote_id=source_quote_id,
         created_by=user_id,
     )
@@ -54,11 +86,7 @@ def create_production_order(
 
 
 def release_order(db: Session, order: ProductionOrder, user_id: int | None) -> None:
-    if order.status != "planned":
-        raise ValueError(f"Cannot release from {order.status}")
-    order.status = "released"
-    audit(db, user=db.get(User, user_id) if user_id else None, action="mo.release",
-          entity="production_order", entity_id=order.id)
+    _transition(db, order, "released", user_id)
 
 
 def issue_material(db: Session, order: ProductionOrder, user_id: int | None) -> dict:
@@ -82,24 +110,24 @@ def issue_material(db: Session, order: ProductionOrder, user_id: int | None) -> 
         )
         line.issued_qty = float(line.issued_qty or 0) + remaining
         issued.append({"item_id": line.item_id, "qty": remaining})
-    if order.status == "planned":
-        order.status = "released"
-    elif order.status == "released":
-        order.status = "in_production"
-    db.flush()
+    # Status transition handled by transition function
+    _transition(db, order, "in_production", user_id)
     audit(db, user=db.get(User, user_id) if user_id else None, action="mo.issue",
           entity="production_order", entity_id=order.id, details={"issued_count": len(issued)})
     return {"issued": issued, "short_lines": len(short)}
 
 
-def set_status(db: Session, order: ProductionOrder, status: str, user_id: int | None) -> None:
-    allowed = ["planned", "released", "in_production", "qc", "packed", "dispatched", "cancelled"]
-    if status not in allowed:
-        raise ValueError(f"Bad status {status!r}")
-    order.status = status
+def _transition(db: Session, order: ProductionOrder, nxt: str, user_id: int | None) -> None:
+    if not can_transition(order.status, nxt):
+        raise ValueError(f"Invalid transition {order.status} → {nxt}")
+    order.status = nxt
     db.flush()
-    audit(db, user=db.get(User, user_id) if user_id else None, action="mo.status",
-          entity="production_order", entity_id=order.id, details={"status": status})
+    audit(db, user=db.get(User, user_id) if user_id else None, action="mo.transition",
+          entity="production_order", entity_id=order.id, details={"from": order.status, "to": nxt})
+
+
+def set_status(db: Session, order: ProductionOrder, status: str, user_id: int | None) -> None:
+    _transition(db, order, status, user_id)
 
 
 def order_view(db: Session, order: ProductionOrder) -> dict:
@@ -128,9 +156,15 @@ def order_view(db: Session, order: ProductionOrder) -> dict:
             }
             for l in lines
         ],
+        "valid_transitions": VALID_TRANSITIONS.get(order.status, []),
     }
 
 
 def all_orders(db: Session) -> list[dict]:
     orders = db.query(ProductionOrder).order_by(ProductionOrder.created_at.desc()).all()
     return [order_view(db, o) for o in orders]
+
+
+def get_valid_transitions(status: str) -> list[str]:
+    """Return allowed next statuses for a given current status."""
+    return VALID_TRANSITIONS.get(status, [])

@@ -15,6 +15,8 @@ import type {
   Department,
   DepartmentStatus,
   Employee,
+  EmployeeDashboardStats,
+  EmployeeImportResult,
   InventoryLedgerRow,
   LoginResponse,
   Notification,
@@ -123,6 +125,7 @@ export const api = {
     request<{ kpis: DashboardKpis }>('/dashboard/overview').then((r) => r.kpis),
   dashboardDepartments: () => request<DepartmentStatus[]>('/dashboard/departments'),
   dashboardActivities: () => request<Activity[]>('/dashboard/activities'),
+  dashboardEmployees: () => request<EmployeeDashboardStats>('/dashboard/employees'),
 
   myTasks: () => request<Task[]>('/tasks/my'),
   allTasks: () => request<Task[]>('/tasks'),
@@ -174,6 +177,14 @@ export const api = {
     request<CreatedUser>(`/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteUser: (id: number) =>
     request<{ ok: boolean; active: boolean }>(`/admin/users/${id}`, { method: 'DELETE' }),
+
+  /** Bulk-onboard employees, optionally with the mobile logins they will use. */
+  importEmployees: (file: File) => {
+    const form = new FormData();
+    form.append('upload', file);
+    return request<EmployeeImportResult>('/admin/employees/import', { method: 'POST', body: form });
+  },
+  employeeImportTemplate: () => requestBlob('/admin/employees/import-template'),
 
   // ── Manufacturing spine ────────────────────────────────────────────
   catalogProducts: (q = '', category = '') => {

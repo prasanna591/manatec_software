@@ -1,115 +1,129 @@
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useMemo } from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { useAuth } from '../auth/AuthContext';
-import { colors, spacing } from '../theme';
+import { ACTIONS } from '../auth/permissions';
+import { Button, Card, Divider, KeyValue, Monogram, SectionHeader } from '../components/ui';
+import { colors, NOT_SET, radius, spacing, typography, withAlpha } from '../theme';
 
 export default function ProfileScreen() {
   const { user, signOut } = useAuth();
 
-  const emp = user?.employee;
+  /** Group the flat "Module:action" grants by module so access is readable. */
+  const grouped = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const grant of user?.permissions ?? []) {
+      const [mod, action] = grant.split(':');
+      if (!mod || !action) continue;
+      const list = map.get(mod) ?? [];
+      list.push(ACTIONS[action as keyof typeof ACTIONS] ?? action);
+      map.set(mod, list);
+    }
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [user?.permissions]);
+
+  if (!user) return null;
+
+  const emp = user.employee;
+  const displayName = emp?.name ?? user.username;
+  const initials = displayName
+    .split(' ')
+    .map((p) => p[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <View style={styles.avatar}>
-        <Text style={styles.avatarText}>{emp?.name?.[0] ?? user?.username?.[0]}</Text>
-      </View>
-      <Text style={styles.name}>{emp?.name ?? user?.username}</Text>
-      <Text style={styles.subtitle}>{user?.role}</Text>
-
-      <View style={styles.card}>
-        <Row label="Employee code" value={emp?.code ?? '—'} />
-        <Row label="Username" value={user?.username ?? '—'} />
-        <Row label="Department ID" value={user?.department_id != null ? String(user.department_id) : '—'} />
-        <Row label="Permissions" value={`${user?.permissions.length ?? 0} grants`} />
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardLabel}>ACCESS GRANTS</Text>
-        <View style={styles.perms}>
-          {(user?.permissions ?? []).slice(0, 12).map((p) => (
-            <View key={p} style={styles.badge}>
-              <Text style={styles.badgeText}>{p}</Text>
-            </View>
-          ))}
-          {(user?.permissions ?? []).length > 12 ? (
-            <Text style={styles.more}>+{(user?.permissions ?? []).length - 12} more</Text>
-          ) : null}
+      <View style={styles.hero}>
+        <Monogram label={initials} seed={user.id} size={72} />
+        <Text style={styles.name}>{displayName}</Text>
+        <Text style={styles.subtitle}>
+          {emp?.name ? user.username : `${user.username} · platform account`}
+        </Text>
+        <View style={styles.roleChip}>
+          <Ionicons name="shield-checkmark" size={14} color="#ffffff" />
+          <Text style={styles.roleChipText}>{user.role}</Text>
         </View>
       </View>
 
-      <TouchableOpacity style={styles.signOut} onPress={signOut} activeOpacity={0.8}>
-        <Text style={styles.signOutText}>SIGN OUT</Text>
-      </TouchableOpacity>
-    </ScrollView>
-  );
-}
+      <SectionHeader label="Account" />
+      <Card style={styles.card}>
+        <KeyValue label="Employee code" value={emp?.code ?? NOT_SET} />
+        <Divider />
+        <KeyValue label="Username" value={user.username} />
+        <Divider />
+        <KeyValue
+          label="Department"
+          value={user.department_id != null ? `#${user.department_id}` : NOT_SET}
+        />
+        <Divider />
+        <KeyValue label="Permission grants" value={`${user.permissions.length}`} />
+      </Card>
 
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.row}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowValue}>{value}</Text>
-    </View>
+      <SectionHeader label={`Access by module (${grouped.length})`} />
+      <Card style={styles.card}>
+        {grouped.map(([mod, actions], i) => (
+          <View key={mod}>
+            {i > 0 ? <Divider /> : null}
+            <View style={styles.permRow}>
+              <Text style={styles.permModule}>{mod}</Text>
+              <View style={styles.actions}>
+                {actions.map((a) => (
+                  <View key={a} style={styles.actionChip}>
+                    <Text style={styles.actionChipText}>{a}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          </View>
+        ))}
+      </Card>
+
+      <Text style={styles.footnote}>
+        Access is enforced by the server. Hiding a control never grants a permission.
+      </Text>
+
+      <Button
+        label="Sign out"
+        variant="danger"
+        icon={<Ionicons name="log-out-outline" size={17} color="#ffffff" />}
+        onPress={() => void signOut()}
+        style={styles.signOut}
+      />
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  content: { padding: spacing.xl, alignItems: 'center' },
-  avatar: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    backgroundColor: colors.primary,
+  content: { padding: spacing.md, paddingBottom: spacing.xxl },
+  hero: { alignItems: 'center', paddingVertical: spacing.lg },
+  name: { ...typography.title, marginTop: spacing.md, textAlign: 'center' },
+  subtitle: { ...typography.bodyMuted, marginTop: 2 },
+  roleChip: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 5,
+    backgroundColor: colors.primary,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 5,
     marginTop: spacing.md,
   },
-  avatarText: { color: '#fff', fontSize: 36, fontWeight: '700' },
-  name: { fontSize: 20, fontWeight: '700', color: colors.text, marginTop: spacing.md },
-  subtitle: { color: colors.muted, textTransform: 'capitalize', marginTop: 2 },
-  card: {
-    alignSelf: 'stretch',
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: spacing.lg,
-    marginTop: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  rowLabel: { color: colors.muted, fontSize: 14 },
-  rowValue: { color: colors.text, fontWeight: '600', fontSize: 14 },
-  cardLabel: {
-    color: colors.muted,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1,
-    marginBottom: spacing.sm,
-  },
-  perms: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
-  badge: {
-    backgroundColor: colors.primarySoft,
-    borderRadius: 6,
+  roleChipText: { color: '#ffffff', fontSize: 12, fontWeight: '800', letterSpacing: 0.6 },
+  card: { marginBottom: spacing.md },
+  permRow: { paddingVertical: spacing.sm, gap: spacing.sm },
+  permModule: { ...typography.body, fontWeight: '700' },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  actionChip: {
+    backgroundColor: withAlpha(colors.primary, 0.1),
+    borderRadius: radius.sm,
     paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    marginBottom: spacing.xs,
+    paddingVertical: 2,
   },
-  badgeText: { color: colors.primaryDark, fontSize: 11, fontWeight: '600' },
-  more: { color: colors.muted, fontSize: 12, alignSelf: 'center', marginLeft: spacing.sm },
-  signOut: {
-    alignSelf: 'stretch',
-    backgroundColor: colors.dangerSoft,
-    borderRadius: 10,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-    marginTop: spacing.xl,
-  },
-  signOutText: { color: colors.danger, fontWeight: '700', letterSpacing: 0.5 },
+  actionChipText: { fontSize: 11, color: colors.primaryDark, fontWeight: '700' },
+  footnote: { ...typography.caption, textAlign: 'center', marginTop: spacing.sm },
+  signOut: { marginTop: spacing.lg },
 });

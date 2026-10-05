@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..csv_upload import _cell, guess_password, rows_from
 from ..db import get_db
 from ..models import Department, Employee, Permission, Role, Task, User
 from ..schemas import (
@@ -294,3 +295,175 @@ def role_permissions(code: str, db: Session = Depends(get_db), _: User = Depends
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Role not found")
     perms = db.scalars(select(Permission).where(Permission.role_id == role.id)).all()
     return {"role": role.code, "permissions": sorted({f"{p.module}:{p.action}" for p in perms})}
+
+
+@router.get("/employees/import-template")
+def employee_import_template(_: User = Depends(requires("Employees", "view"))) -> Response:
+    """Blank CSV the HR team fills in, so the upload screen can offer a download."""
+    header = (
+        "employee_code,name,department_code,manager_code,phone,email,"
+        "username,role_code,password\n"
+    )
+    sample = (
+        "EMP1001,Ramesh Patil,PROD,,+91-90000-00001,ramesh.patil@manatec.net,"
+        "ramesh.patil,OPER,\n"
+        "EMP1002,Sneha Kulkarni,QUAL,EMP1001,+91-90000-00002,sneha.k@manatec.net,"
+        "sneha.kulkarni,QINSP,\n"
+    )
+    return Response(
+        content=header + sample,
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="employee-import-template.csv"'},
+    )
+
+
+@router.post("/employees/import")
+def import_employees(
+    request: Request,
+    upload: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    actor: User = Depends(requires("Employees", "create")),
+) -> dict:
+    """Bulk-onboard employees from a spreadsheet, optionally with mobile logins.
+
+    One row per employee. When `username` and `role_code` are supplied the row
+    also provisions a login, which is what lets the person open the mobile app
+    with exactly the department access their role carries in FRS 5.2.
+
+    Columns (header matching is case/space/underscore insensitive):
+      employee_code, name, department_code, manager_code, phone, email,
+      username, role_code, password
+
+    `password` may be left blank, in which case a readable initial password is
+    generated and returned once so it can be handed over. Rows are independent:
+    a bad row is reported and skipped, it does not abort the upload.
+    """
+    rows = rows_from(upload)
+    if not rows:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "No rows found in the file")
+    if len(rows) > 2000:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            "At most 2000 rows per upload")
+
+    departments = {d.code.upper(): d for d in db.scalars(select(Department)).all()}
+    roles = {r.code.upper(): r for r in db.scalars(select(Role)).all()}
+    by_code = {e.code.upper(): e for e in db.scalars(select(Employee)).all()}
+
+    created_emps = 0
+    updated_emps = 0
+    created_users = 0
+    results: list[dict] = []
+
+    for index, row in enumerate(rows, start=2):  # row 1 is the header
+        emp_code = _cell(row, "employee_code", "code", "emp_code")
+        name = _cell(row, "name", "employee_name", "full_name")
+        problems: list[str] = []
+        if not emp_code:
+            problems.append("employee_code is required")
+        if not name:
+            problems.append("name is required")
+        if problems:
+            results.append({"row": index, "employee_code": emp_code, "status": "failed",
+                            "detail": "; ".join(problems)})
+            continue
+
+        dept_code = _cell(row, "department_code", "department").upper()
+        department = departments.get(dept_code) if dept_code else None
+        if dept_code and not department:
+            results.append({"row": index, "employee_code": emp_code, "status": "failed",
+                            "detail": f"unknown department_code '{dept_code}'"})
+            continue
+
+        mgr_code = _cell(row, "manager_code", "manager").upper()
+        manager = by_code.get(mgr_code) if mgr_code else None
+        if mgr_code and not manager:
+            results.append({"row": index, "employee_code": emp_code, "status": "failed",
+                            "detail": f"unknown manager_code '{mgr_code}'"})
+            continue
+
+        existing = by_code.get(emp_code.upper())
+        if existing:
+            existing.name = name
+            if department:
+                existing.department_id = department.id
+            if manager:
+                existing.manager_id = manager.id
+            existing.phone = _cell(row, "phone", "mobile") or None
+            existing.email = _cell(row, "email") or None
+            existing.active = True
+            emp = existing
+            updated_emps += 1
+            emp_status = "updated"
+        else:
+            emp = Employee(
+                code=emp_code,
+                name=name,
+                department_id=department.id if department else None,
+                manager_id=manager.id if manager else None,
+                phone=_cell(row, "phone", "mobile") or None,
+                email=_cell(row, "email") or None,
+            )
+            db.add(emp)
+            db.flush()
+            by_code[emp.code.upper()] = emp
+            created_emps += 1
+            emp_status = "created"
+
+        # ── optional mobile login for this person ────────────────────────
+        username = _cell(row, "username", "login", "user_name")
+        role_code = _cell(row, "role_code", "role").upper()
+        if username or role_code:
+            if not username or not role_code:
+                results.append({"row": index, "employee_code": emp_code, "status": emp_status,
+                                "detail": "employee saved, but username and role_code are both "
+                                          "needed to create the login"})
+                continue
+            role = roles.get(role_code)
+            if not role:
+                results.append({"row": index, "employee_code": emp_code, "status": emp_status,
+                                "detail": f"employee saved, but unknown role_code '{role_code}'"})
+                continue
+            if db.scalar(select(User).where(User.username == username)):
+                results.append({"row": index, "employee_code": emp_code, "status": emp_status,
+                                "detail": f"employee saved, but username '{username}' already exists"})
+                continue
+            password = _cell(row, "password") or guess_password(username)
+            user = User(
+                username=username,
+                password_hash=hash_password(password),
+                employee_id=emp.id,
+                role_id=role.id,
+            )
+            db.add(user)
+            db.flush()
+            created_users += 1
+            notify(db, recipient_id=user.id, title="Welcome to Manatec Digital",
+                   body="Your account has been created. Please change your password.")
+            results.append({
+                "row": index, "employee_code": emp_code, "status": emp_status,
+                "detail": f"login created with role {role.code}",
+                "username": username, "password": password, "role_code": role.code,
+            })
+            continue
+
+        results.append({"row": index, "employee_code": emp_code, "status": emp_status,
+                        "detail": "no login requested"})
+
+    audit(db, actor=actor, action="import", entity_type="employee", entity_ref=upload.filename,
+          after={"rows": len(rows), "employees_created": created_emps,
+                 "employees_updated": updated_emps, "accounts_created": created_users},
+          ip=request.client.host if request.client else None)
+    db.commit()
+
+    failed = sum(1 for r in results if r["status"] == "failed")
+    return {
+        "ok": True,
+        "rows": len(rows),
+        "employees_created": created_emps,
+        "employees_updated": updated_emps,
+        "accounts_created": created_users,
+        "failed": failed,
+        # Credentials are returned exactly once -- they are never stored in clear.
+        "accounts": [r for r in results if r.get("username")],
+        "results": results,
+    }

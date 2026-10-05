@@ -1,83 +1,122 @@
 import { useCallback, useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '../api/client';
 import type { CatalogProduct, ProductionOrder } from '../api/types';
-import { colors, spacing } from '../theme';
+import { useAuth } from '../auth/AuthContext';
+import { messageOf } from '../auth/session';
+import {
+  AccessDenied,
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorBanner,
+  KeyValue,
+  Chip,
+  Monogram,
+  OptionRow,
+  ScreenSkeleton,
+  SectionHeader,
+} from '../components/ui';
+import { colors, formatDate, spacing, typography } from '../theme';
 
-const statusColor: Record<string, string> = {
-  planned: colors.muted,
+const STAGES = ['draft', 'planned', 'released', 'in_production', 'qc', 'packed', 'dispatched'] as const;
+
+const STATUS_COLOR: Record<string, string> = {
+  draft: colors.muted,
+  planned: colors.info,
   released: colors.primary,
   in_production: colors.warn,
-  qc: colors.ok,
-  packed: colors.ok,
+  qc: colors.violet,
+  packed: colors.teal,
   dispatched: colors.ok,
   cancelled: colors.danger,
+  on_hold: colors.warn,
+};
+
+/** Human readable labels for stages. */
+const STAGE_LABEL: Record<string, string> = {
+  draft: 'Draft',
+  planned: 'Planned',
+  released: 'Released',
+  in_production: 'In Production',
+  qc: 'Quality Check',
+  packed: 'Packed',
+  dispatched: 'Dispatched',
+  cancelled: 'Cancelled',
+  on_hold: 'On Hold',
 };
 
 export default function ProductionScreen() {
+  const { can } = useAuth();
+  const canView = can('Production', 'view');
+  const canCreate = can('Production', 'create');
+  const canEdit = can('Production', 'edit');
+
   const [orders, setOrders] = useState<ProductionOrder[]>([]);
   const [products, setProducts] = useState<CatalogProduct[]>([]);
-  const [showCreate, setShowCreate] = useState(false);
   const [pick, setPick] = useState<CatalogProduct | null>(null);
-  const [qty, setQty] = useState('1');
+  const [qty, setQty] = useState('10');
+  const [showCreate, setShowCreate] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
+    if (!canView) {
+      setLoading(false);
+      return;
+    }
     try {
       setError(null);
       const [o, p] = await Promise.all([api.productionOrders(), api.catalogProducts('')]);
       setOrders(o.items);
       setProducts(p.items);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load production');
+      setError(messageOf(e, 'Failed to load production'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [canView]);
 
   useFocusEffect(
     useCallback(() => {
-      load();
+      void load();
     }, [load]),
   );
+
+  const refreshList = async () => setOrders((await api.productionOrders()).items);
 
   const plan = useCallback(async () => {
     if (!pick) return;
     setBusy(true);
+    setError(null);
     try {
-      await api.planProduction({ product_id: pick.id, qty: Number(qty) || 1 });
+      await api.createProductionOrder({ product_id: pick.id, qty: Number(qty) || 1 });
       setShowCreate(false);
-      await load();
+      setPick(null);
+      await refreshList();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Planning failed');
+      setError(messageOf(e, 'Could not create the order'));
     } finally {
       setBusy(false);
     }
-  }, [pick, qty, load]);
+  }, [pick, qty]);
 
-  const act = useCallback(
-    async (fn: () => Promise<ProductionOrder>) => {
+  const run = useCallback(
+    async (fn: () => Promise<unknown>) => {
       setBusy(true);
+      setError(null);
       try {
         await fn();
-        const o = await api.productionOrders();
-        setOrders(o.items);
+        await refreshList();
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'Action failed');
+        setError(messageOf(e, 'Action failed'));
       } finally {
         setBusy(false);
       }
@@ -85,61 +124,23 @@ export default function ProductionScreen() {
     [],
   );
 
-  const stage = useCallback(
-    async (id: number, status: string) => {
-      setBusy(true);
-      try {
-        await api.setProductionStatus(id, status);
-        const o = await api.productionOrders();
-        setOrders(o.items);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Status update failed');
-      } finally {
-        setBusy(false);
-      }
-    },
-    [],
-  );
-
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
-  }
+  if (!canView) return <AccessDenied module="Production" />;
+  if (loading) return <ScreenSkeleton label="Loading production" rows={5} />;
 
   return (
     <View style={styles.screen}>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      <TouchableOpacity style={styles.newBtn} onPress={() => setShowCreate(!showCreate)}>
-        <Text style={styles.newText}>{showCreate ? 'CLOSE' : '+ NEW MANUFACTURING ORDER'}</Text>
-      </TouchableOpacity>
+      <View style={styles.bannerWrap}>
+        {error ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
+      </View>
 
-      {showCreate ? (
-        <View style={styles.card}>
-          <Text style={styles.sectionLabel}>SELECT PRODUCT</Text>
-          {products.slice(0, 20).map((p) => (
-            <TouchableOpacity
-              key={p.id}
-              style={[styles.prod, pick?.id === p.id && styles.prodActive]}
-              onPress={() => setPick(p)}
-            >
-              <Text style={styles.prodName} numberOfLines={1}>{p.name} · {p.model_code}</Text>
-              <Text style={styles.prodQty}>qty {qty}</Text>
-            </TouchableOpacity>
-          ))}
-          <Text style={styles.sectionLabel}>QTY</Text>
-          <View style={styles.qtyRow}>
-            {['1', '5', '10', '25'].map((n) => (
-              <TouchableOpacity key={n} style={[styles.chip, qty === n && styles.chipActive]} onPress={() => setQty(n)}>
-                <Text style={[styles.chipText, qty === n && styles.chipTextActive]}>{n}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          <TouchableOpacity style={[styles.newBtn, { backgroundColor: colors.primary, opacity: pick ? 1 : 0.5 }]} disabled={!pick || busy} onPress={() => plan()}>
-            <Text style={[styles.newText, { color: '#fff' }]}>PLAN MANUFACTURING</Text>
-          </TouchableOpacity>
+      {canCreate ? (
+        <View style={styles.actionBar}>
+          <Button
+            label={showCreate ? 'Close planner' : '+ New manufacturing order'}
+            variant={showCreate ? 'secondary' : 'primary'}
+            icon={<Ionicons name="add" size={18} color={showCreate ? colors.text : '#fff'} />}
+            onPress={() => setShowCreate((s) => !s)}
+          />
         </View>
       ) : null}
 
@@ -147,137 +148,151 @@ export default function ProductionScreen() {
         data={orders}
         keyExtractor={(o) => String(o.id)}
         contentContainerStyle={styles.list}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
-        ListEmptyComponent={<Text style={styles.empty}>No manufacturing orders.</Text>}
-        renderItem={({ item }) => (
-          <View style={styles.card}>
-            <View style={styles.top}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.moNo}>{item.mo_no}</Text>
-                <Text style={styles.prodName}>{item.product_name} × {item.qty}</Text>
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            tintColor={colors.primary}
+            onRefresh={() => {
+              setRefreshing(true);
+              void load();
+            }}
+          />
+        }
+        ListHeaderComponent={
+          showCreate && canCreate ? (
+            <Card level={2} style={styles.planner}>
+              <SectionHeader label="Select product" />
+              <View style={styles.prodList}>
+                {products.slice(0, 12).map((p) => (
+                  <OptionRow
+                    key={p.id}
+                    label={p.name}
+                    sublabel={p.model_code}
+                    monogram={<Monogram label={p.name} seed={p.id} size={32} />}
+                    selected={pick?.id === p.id}
+                    onPress={() => setPick(p)}
+                  />
+                ))}
               </View>
-              <View style={[styles.statusBox, { backgroundColor: statusColor[item.status] ?? colors.muted }]}>
-                <Text style={styles.statusText}>{item.status.toUpperCase()}</Text>
+
+              <SectionHeader label="Quantity" />
+              <View style={styles.qtyRow}>
+                {['1', '5', '10', '25'].map((n) => (
+                  <Chip
+                    key={n}
+                    label={n}
+                    accessibilityLabel={`Quantity ${n}`}
+                    active={qty === n}
+                    onPress={() => setQty(n)}
+                  />
+                ))}
               </View>
-            </View>
-            <Text style={styles.meta}>
-              due {item.due_date} · priority {item.priority}
-              {item.material_status ? ` · material ${item.material_status}` : ''}
-            </Text>
-            {item.status === 'planned' ? (
-              <View style={styles.btnRow}>
-                <Btn danger busy={busy} label="CANCEL" onPress={() => stage(item.id, 'cancelled')} />
-                <Btn ok busy={busy} label="RELEASE" onPress={() => act(() => api.releaseProductionOrder(item.id))} />
+
+              <Button
+                label="Plan manufacturing order"
+                onPress={plan}
+                disabled={!pick}
+                loading={busy}
+                style={styles.mt}
+              />
+            </Card>
+          ) : null
+        }
+        ListEmptyComponent={
+          <EmptyState
+            title="No manufacturing orders"
+            hint={canCreate ? 'Create one to start the production spine.' : 'Nothing scheduled for you yet.'}
+          />
+        }
+        renderItem={({ item }) => {
+          const tone = STATUS_COLOR[item.status] ?? colors.muted;
+          const stageIdx = STAGES.indexOf(item.status as (typeof STAGES)[number]);
+          const pending = item.lines.reduce((a, l) => a + l.pending, 0);
+          const allowed = item.valid_transitions ?? [];
+          return (
+            <Card style={styles.card}>
+              <View style={styles.top}>
+                <View style={styles.flex}>
+                  <Text style={styles.moNo}>{item.order_no}</Text>
+                  <Text style={styles.orderProduct} numberOfLines={1}>
+                    {item.product_name} × {item.qty}
+                  </Text>
+                </View>
+                <Badge label={STAGE_LABEL[item.status] ?? item.status} color={tone} />
               </View>
-            ) : null}
-            {item.status === 'released' ? (
-              <View style={styles.btnRow}>
-                <Btn danger busy={busy} label="CANCEL" onPress={() => stage(item.id, 'cancelled')} />
-                <Btn ok busy={busy} label="ISSUE MATERIAL" onPress={() => act(() => api.issueMaterial(item.id))} />
-              </View>
-            ) : null}
-            {item.status === 'in_production' ? (
-              <View style={styles.btnRow}>
-                <Btn ok busy={busy} label="START QC" onPress={() => stage(item.id, 'qc')} />
-              </View>
-            ) : null}
-            {item.status === 'qc' ? (
-              <View style={styles.btnRow}>
-                <Btn ok busy={busy} label="PACK" onPress={() => stage(item.id, 'packed')} />
-              </View>
-            ) : null}
-            {item.status === 'packed' ? (
-              <View style={styles.btnRow}>
-                <Btn ok busy={busy} label="DISPATCH" onPress={() => stage(item.id, 'dispatched')} />
-              </View>
-            ) : null}
-          </View>
-        )}
+
+              {stageIdx >= 0 ? (
+                <View style={styles.track}>
+                  {STAGES.map((s, i) => (
+                    <View
+                      key={s}
+                      style={[
+                        styles.trackSeg,
+                        { backgroundColor: i <= stageIdx ? tone : colors.border },
+                      ]}
+                    />
+                  ))}
+                </View>
+              ) : null}
+
+              <KeyValue label="Due" value={formatDate(item.due_date)} />
+              <KeyValue
+                label="Material pending"
+                value={`${pending} ${pending === 1 ? 'unit' : 'units'}`}
+              />
+              {item.source_quote_no ? <KeyValue label="From quote" value={item.source_quote_no} /> : null}
+
+              {canEdit && allowed.length > 0 ? (
+                <View style={styles.btnRow}>
+                  {allowed.map((nextStatus) => {
+                    const label = STAGE_LABEL[nextStatus] ?? nextStatus;
+                    let variant: 'primary' | 'success' | 'danger' | 'secondary' = 'primary';
+                    if (nextStatus === 'cancelled') variant = 'danger';
+                    else if (nextStatus === 'in_production') variant = 'success';
+                    else if (nextStatus === 'dispatched') variant = 'success';
+                    else if (nextStatus === 'on_hold') variant = 'secondary';
+                    return (
+                      <Button
+                        key={nextStatus}
+                        label={label}
+                        variant={variant}
+                        compact
+                        style={styles.flex}
+                        disabled={busy}
+                        onPress={() => void run(() => api.setProductionStatus(item.id, nextStatus))}
+                      />
+                    );
+                  })}
+                </View>
+              ) : canEdit ? (
+                <Text style={styles.note}>No valid transitions from this state.</Text>
+              ) : (
+                <Text style={styles.note}>Production edit rights are needed to move this order.</Text>
+              )}
+            </Card>
+          );
+        }}
       />
     </View>
   );
 }
 
-function Btn({ label, onPress, danger, ok, busy }: { label: string; onPress: () => void; danger?: boolean; ok?: boolean; busy?: boolean }) {
-  return (
-    <TouchableOpacity
-      style={[styles.btn, danger && styles.btnDanger, ok && styles.btnOk]}
-      disabled={busy}
-      onPress={onPress}
-    >
-      <Text style={[styles.btnText, danger && styles.btnDangerText, ok && styles.btnOkText]}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
-  error: { color: colors.danger, paddingHorizontal: spacing.md },
-  newBtn: {
-    backgroundColor: colors.primarySoft,
-    borderRadius: 10,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-    marginHorizontal: spacing.md,
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  newText: { color: colors.primary, fontWeight: '700', letterSpacing: 0.5, fontSize: 13 },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: spacing.lg,
-    marginHorizontal: spacing.md,
-    marginBottom: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  top: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
-  moNo: { fontSize: 15, fontWeight: '700', color: colors.text },
-  prodName: { color: colors.text, fontSize: 14, marginTop: 2 },
-  statusBox: { borderRadius: 8, paddingHorizontal: spacing.sm, paddingVertical: 3 },
-  statusText: { color: '#fff', fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
-  meta: { color: colors.muted, fontSize: 12, marginTop: spacing.sm },
-  btnRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.lg },
-  btn: { flex: 1, borderRadius: 8, paddingVertical: spacing.sm, alignItems: 'center' },
-  btnDanger: { backgroundColor: colors.dangerSoft },
-  btnOk: { backgroundColor: colors.okSoft },
-  btnText: { fontWeight: '700', fontSize: 13 },
-  btnDangerText: { color: colors.danger },
-  btnOkText: { color: colors.ok },
-  sectionLabel: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1,
-    marginTop: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  prod: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: spacing.sm,
-  },
-  prodActive: { borderColor: colors.primary, borderWidth: 2 },
-  prodQty: { color: colors.primary, fontWeight: '700' },
-  qtyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md },
-  chip: {
-    borderRadius: 16,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.lg,
-    backgroundColor: colors.bg,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  chipText: { color: colors.muted, fontWeight: '600' },
-  chipTextActive: { color: '#fff' },
-  list: { paddingBottom: spacing.xl },
-  empty: { textAlign: 'center', color: colors.muted, marginTop: spacing.xl },
+  flex: { flex: 1 },
+  bannerWrap: { paddingHorizontal: spacing.md, paddingTop: spacing.md },
+  actionBar: { paddingHorizontal: spacing.md, paddingTop: spacing.md },
+  list: { padding: spacing.md, paddingBottom: spacing.xxl },
+  planner: { marginBottom: spacing.md },
+  prodList: { gap: spacing.sm },
+  qtyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  mt: { marginTop: spacing.lg },
+  card: { marginBottom: spacing.md },
+  top: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  moNo: { ...typography.section },
+  orderProduct: { ...typography.bodyMuted, marginTop: 2 },
+  track: { flexDirection: 'row', gap: 3, marginVertical: spacing.md },
+  trackSeg: { flex: 1, height: 5, borderRadius: 3 },
+  btnRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
+  note: { ...typography.caption, color: colors.warn, marginTop: spacing.md },
 });

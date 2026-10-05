@@ -1,19 +1,23 @@
-import { useCallback, useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '../api/client';
 import type { LeaveBalanceItem, LeaveRequest } from '../api/types';
-import { colors, spacing } from '../theme';
+import { messageOf } from '../auth/session';
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorBanner,
+  Chip,
+  ScreenSkeleton,
+  SectionHeader,
+  TextField,
+} from '../components/ui';
+import { colors, spacing, typography } from '../theme';
 
 const TYPES = [
   { type: 'casual', label: 'Casual' },
@@ -22,7 +26,7 @@ const TYPES = [
   { type: 'other', label: 'Other' },
 ];
 
-const statusColor: Record<string, string> = {
+const STATUS_COLOR: Record<string, string> = {
   pending_dept: colors.warn,
   pending_hr: colors.warn,
   approved: colors.ok,
@@ -30,19 +34,38 @@ const statusColor: Record<string, string> = {
   cancelled: colors.muted,
 };
 
-interface Combined extends LeaveRequest {
-  _fromMe: boolean;
+const STATUS_LABEL: Record<string, string> = {
+  pending_dept: 'PENDING DEPT',
+  pending_hr: 'PENDING HR',
+  approved: 'APPROVED',
+  rejected: 'REJECTED',
+  cancelled: 'CANCELLED',
+};
+
+interface Form {
+  type: string;
+  days: string;
+  reason: string;
+}
+
+/** Leave is booked against the next cycle starting on the 1st. */
+function cycleRange(days: number): { from: string; to: string } {
+  const today = new Date();
+  const from = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  const to = new Date(from);
+  to.setDate(to.getDate() + days - 1);
+  const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return { from: iso(from), to: iso(to) };
 }
 
 export default function LeaveScreen() {
   const [balances, setBalances] = useState<LeaveBalanceItem[]>([]);
   const [mine, setMine] = useState<LeaveRequest[]>([]);
   const [approvals, setApprovals] = useState<LeaveRequest[]>([]);
-  const [combo, setCombo] = useState<Combined[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState<{ type: string; days: string; reason: string } | null>(null);
+  const [form, setForm] = useState<Form | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -52,14 +75,8 @@ export default function LeaveScreen() {
       setBalances(b.items);
       setMine(m);
       setApprovals(a);
-      setCombo([
-        ...m.map((x) => ({ ...x, _fromMe: true })),
-        ...a
-          .filter((x) => !m.some((y) => y.id === x.id))
-          .map((x) => ({ ...x, _fromMe: false })),
-      ]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load leave data');
+      setError(messageOf(e, 'Failed to load leave data'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -68,18 +85,19 @@ export default function LeaveScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      load();
+      void load();
     }, [load]),
   );
 
   const decide = useCallback(
     async (id: number, approve: boolean) => {
       setBusy(true);
+      setError(null);
       try {
         await (approve ? api.leaveApprove(id) : api.leaveReject(id));
         await load();
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'Decision failed');
+        setError(messageOf(e, 'Could not record the decision'));
       } finally {
         setBusy(false);
       }
@@ -88,206 +106,195 @@ export default function LeaveScreen() {
   );
 
   const apply = useCallback(async () => {
-    if (!form || !form.type || Number(form.days) < 1) return;
-    const today = new Date();
-    const from = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-    const to = new Date(from);
-    to.setDate(to.getDate() + Number(form.days) - 1);
+    if (!form) return;
+    const days = Number(form.days);
+    if (!form.type || days < 1) return;
+    const { from, to } = cycleRange(days);
     setBusy(true);
+    setError(null);
     try {
-      await api.leaveApply({
-        leave_type: form.type,
-        from_date: from.toISOString().slice(0, 10),
-        to_date: to.toISOString().slice(0, 10),
-        reason: form.reason,
-      });
+      await api.leaveApply({ leave_type: form.type, from_date: from, to_date: to, reason: form.reason });
       setForm(null);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Apply failed');
+      setError(messageOf(e, 'Could not submit the request'));
     } finally {
       setBusy(false);
     }
   }, [form, load]);
 
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
-  }
+  const range = useMemo(() => cycleRange(Number(form?.days ?? 1)), [form?.days]);
+
+  if (loading) return <ScreenSkeleton label="Loading leave" tiles={3} rows={4} />;
 
   return (
     <ScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
+      keyboardShouldPersistTaps="handled"
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          tintColor={colors.primary}
+          onRefresh={() => {
+            setRefreshing(true);
+            void load();
+          }}
+        />
+      }
     >
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
 
-      <Text style={styles.sectionLabel}>BALANCE</Text>
       <View style={styles.balRow}>
         {balances.map((b) => (
-          <View key={b.leave_type} style={styles.balBox}>
-            <Text style={styles.balValue}>{b.available}</Text>
+          <Card key={b.leave_type} style={styles.balBox} level={1}>
+            <Text style={[styles.balValue, b.available <= 0 && styles.balEmpty]}>{b.available}</Text>
             <Text style={styles.balLabel}>{b.leave_type}</Text>
-          </View>
+            <Text style={styles.balMeta}>of {b.allocated}</Text>
+          </Card>
         ))}
       </View>
 
-      <TouchableOpacity
-        style={styles.applyBtn}
-        disabled={busy}
+      <Button
+        label={form ? 'Cancel request' : '+ Apply for leave'}
+        variant={form ? 'secondary' : 'primary'}
+        icon={
+          <Ionicons
+            name={form ? 'close' : 'calendar'}
+            size={17}
+            color={form ? colors.text : '#ffffff'}
+          />
+        }
         onPress={() => setForm(form ? null : { type: 'casual', days: '1', reason: '' })}
-        activeOpacity={0.8}
-      >
-        <Text style={styles.applyText}>{form ? 'CANCEL' : '+ APPLY LEAVE'}</Text>
-      </TouchableOpacity>
+        style={styles.cta}
+      />
 
       {form ? (
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>NEW LEAVE REQUEST</Text>
-          <View style={styles.typeRow}>
+        <Card level={2} style={styles.form}>
+          <SectionHeader label="Leave type" />
+          <View style={styles.chipRow}>
             {TYPES.map((t) => (
-              <TouchableOpacity
+              <Chip
                 key={t.type}
-                style={[styles.typeChip, form.type === t.type && styles.typeChipActive]}
+                label={t.label}
+                active={form.type === t.type}
                 onPress={() => setForm({ ...form, type: t.type })}
-              >
-                <Text style={[styles.typeChipText, form.type === t.type && styles.typeChipTextActive]}>{t.label}</Text>
-              </TouchableOpacity>
+              />
             ))}
           </View>
-          <View style={styles.daysRow}>
+
+          <SectionHeader label="Days" />
+          <View style={styles.chipRow}>
             {['1', '2', '3', '5'].map((d) => (
-              <TouchableOpacity
+              <Chip
                 key={d}
-                style={[styles.typeChip, form.days === d && styles.typeChipActive]}
+                label={`${d} day${d === '1' ? '' : 's'}`}
+                accessibilityLabel={`${d} ${d === '1' ? 'day' : 'days'}`}
+                active={form.days === d}
                 onPress={() => setForm({ ...form, days: d })}
-              >
-                <Text style={[styles.typeChipText, form.days === d && styles.typeChipTextActive]}>{d} day{d === '1' ? '' : 's'}</Text>
-              </TouchableOpacity>
+              />
             ))}
           </View>
-          <TouchableOpacity
-            style={[styles.applyBtn, { backgroundColor: colors.primary, marginBottom: 0 }]}
-            disabled={busy}
-            onPress={() => apply()}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.applyText, { color: '#fff' }]}>SUBMIT FOR APPROVAL</Text>
-          </TouchableOpacity>
-        </View>
+
+          <SectionHeader label="Reason" />
+          <TextField
+            label="Reason for leave"
+            hint="Your approver sees this with the request."
+            containerStyle={styles.fieldBlock}
+            style={styles.reasonInput}
+            value={form.reason}
+            onChangeText={(v) => setForm({ ...form, reason: v })}
+            placeholder="Why do you need this leave?"
+            multiline
+          />
+
+          <Text style={styles.rangeNote}>
+            {range.from} → {range.to}
+          </Text>
+          <Button label="Submit for approval" onPress={apply} loading={busy} />
+        </Card>
       ) : null}
 
-      <Text style={styles.sectionLabel}>REQUESTS & APPROVALS</Text>
-      {combo.length === 0 ? (
-        <Text style={styles.empty}>No leave requests yet.</Text>
-      ) : (
-        combo.map((r) => (
-          <View key={r.id} style={styles.card}>
-            <View style={styles.rowTop}>
-              <Text style={styles.cardTitle}>
-                {r.leave_type} · {r.days} day{r.days === 1 ? '' : 's'}
-              </Text>
-              <View style={[styles.badge, { backgroundColor: statusColor[r.status] ?? colors.muted }]}>
-                <Text style={styles.badgeText}>{r.status.replace('_', ' ').toUpperCase()}</Text>
-              </View>
-            </View>
-            <Text style={styles.cardBody}>
-              {r.from_date} → {r.to_date}
-              {r._fromMe ? '' : ` · ${r.employee_name ?? ''}`}
-            </Text>
-            {r.reason ? <Text style={styles.cardBody}>{r.reason}</Text> : null}
-            {!r._fromMe && (r.status === 'pending_dept' || r.status === 'pending_hr') ? (
+      {approvals.length > 0 ? (
+        <>
+          <SectionHeader label={`Awaiting your approval (${approvals.length})`} />
+          {approvals.map((r) => (
+            <LeaveCard key={r.id} request={r}>
               <View style={styles.btnRow}>
-                <TouchableOpacity style={[styles.btn, styles.reject]} disabled={busy} onPress={() => decide(r.id, false)} activeOpacity={0.8}>
-                  <Text style={styles.rejectText}>REJECT</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.btn, styles.approve]} disabled={busy} onPress={() => decide(r.id, true)} activeOpacity={0.8}>
-                  <Text style={styles.approveText}>APPROVE</Text>
-                </TouchableOpacity>
+                <Button
+                  label="Reject"
+                  variant="danger"
+                  compact
+                  style={styles.flex}
+                  disabled={busy}
+                  onPress={() => void decide(r.id, false)}
+                />
+                <Button
+                  label="Approve"
+                  variant="success"
+                  compact
+                  style={styles.flex}
+                  disabled={busy}
+                  onPress={() => void decide(r.id, true)}
+                />
               </View>
-            ) : null}
-          </View>
-        ))
+            </LeaveCard>
+          ))}
+        </>
+      ) : null}
+
+      <SectionHeader label={approvals.length > 0 ? 'My requests' : 'My requests & approvals'} />
+      {mine.length === 0 ? (
+        <EmptyState title="No leave requests" hint="Apply above to book time off." />
+      ) : (
+        mine.map((r) => <LeaveCard key={r.id} request={r} />)
       )}
     </ScrollView>
   );
 }
 
+function LeaveCard({ request, children }: { request: LeaveRequest; children?: React.ReactNode }) {
+  const tone = STATUS_COLOR[request.status] ?? colors.muted;
+  return (
+    <Card style={styles.card}>
+      <View style={styles.rowTop}>
+        <Text style={styles.cardTitle}>
+          {request.employee_name ?? 'You'} · {request.leave_type}
+        </Text>
+        <Badge label={STATUS_LABEL[request.status] ?? request.status} color={tone} />
+      </View>
+      <Text style={styles.cardBody}>
+        {request.from_date} → {request.to_date} · {request.days} day
+        {request.days === 1 ? '' : 's'}
+      </Text>
+      {request.reason ? <Text style={styles.reason}>{request.reason}</Text> : null}
+      {request.decided_note ? <Text style={styles.note}>Note: {request.decided_note}</Text> : null}
+      {children}
+    </Card>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  content: { padding: spacing.lg, paddingBottom: spacing.xl },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
-  sectionLabel: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1,
-    marginTop: spacing.lg,
-    marginBottom: spacing.sm,
-  },
-  error: { color: colors.danger, marginBottom: spacing.md },
+  flex: { flex: 1 },
+  content: { padding: spacing.md, paddingBottom: spacing.xxl },
   balRow: { flexDirection: 'row', gap: spacing.sm },
-  balBox: {
-    flex: 1,
-    backgroundColor: colors.card,
-    borderRadius: 10,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  balValue: { fontSize: 20, fontWeight: '700', color: colors.primary },
-  balLabel: { color: colors.muted, fontSize: 11, textTransform: 'capitalize', marginTop: 2 },
-  applyBtn: {
-    backgroundColor: colors.primarySoft,
-    borderRadius: 10,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-    marginTop: spacing.lg,
-  },
-  applyText: { color: colors.primary, fontWeight: '700', letterSpacing: 0.5 },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: spacing.lg,
-    marginTop: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  cardLabel: {
-    color: colors.muted,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1,
-    marginBottom: spacing.md,
-  },
-  cardTitle: { fontSize: 15, fontWeight: '700', color: colors.text, flex: 1 },
-  cardBody: { color: colors.muted, marginTop: spacing.xs, fontSize: 13 },
-  rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  badge: { borderRadius: 8, paddingHorizontal: spacing.sm, paddingVertical: 2 },
-  badgeText: { color: '#fff', fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
-  typeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  daysRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm, marginBottom: spacing.lg },
-  typeChip: {
-    borderRadius: 16,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.lg,
-    backgroundColor: colors.bg,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  typeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  typeChipText: { color: colors.muted, fontWeight: '600', fontSize: 13 },
-  typeChipTextActive: { color: '#fff' },
-  btnRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.lg },
-  btn: { flex: 1, borderRadius: 10, paddingVertical: spacing.md, alignItems: 'center' },
-  reject: { backgroundColor: colors.dangerSoft },
-  rejectText: { color: colors.danger, fontWeight: '700' },
-  approve: { backgroundColor: colors.okSoft },
-  approveText: { color: colors.ok, fontWeight: '700' },
-  empty: { textAlign: 'center', color: colors.muted, marginTop: spacing.lg },
+  balBox: { flex: 1, alignItems: 'center', paddingVertical: spacing.md },
+  balValue: { ...typography.title, color: colors.primary, fontWeight: '800' },
+  balEmpty: { color: colors.danger },
+  balLabel: { ...typography.caption, textTransform: 'capitalize', marginTop: 2, fontWeight: '700' },
+  balMeta: { ...typography.caption, fontSize: 10 },
+  cta: { marginTop: spacing.lg },
+  form: { marginTop: spacing.md },
+  fieldBlock: { marginBottom: spacing.md },
+  reasonInput: { backgroundColor: colors.bgSoft },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.lg },
+  rangeNote: { ...typography.caption, marginBottom: spacing.md },
+  card: { marginBottom: spacing.md },
+  rowTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  cardTitle: { ...typography.body, fontWeight: '700', flex: 1, textTransform: 'capitalize' },
+  cardBody: { ...typography.bodyMuted, marginTop: 4 },
+  reason: { ...typography.bodyMuted, marginTop: spacing.sm, fontStyle: 'italic' },
+  note: { ...typography.caption, marginTop: 6 },
+  btnRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
 });

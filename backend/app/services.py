@@ -1,9 +1,24 @@
 """Shared helpers: audit trail (FRS 20.2) and notification creation (FRS 17.2)."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 
 from .models import AuditLog, Notification, User
+
+
+def as_utc(dt: datetime | None) -> datetime | None:
+    """Tag a stored timestamp as UTC when it comes back naive.
+
+    SQLite has no timezone type, so a `DateTime` column round-trips without
+    `tzinfo`. Comparing that against an aware `datetime.now(timezone.utc)`
+    raises, so every elapsed-time calculation goes through this. Same convention
+    as `routers/attendance.py::_utc`.
+    """
+    if dt is None:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 def audit(

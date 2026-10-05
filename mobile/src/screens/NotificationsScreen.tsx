@@ -1,18 +1,19 @@
-import { useCallback, useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { api } from '../api/client';
 import type { Notification } from '../api/types';
-import { colors, priorityColor, spacing } from '../theme';
+import { messageOf } from '../auth/session';
+import {
+  Chip,
+  EmptyState,
+  ErrorBanner,
+  ListSkeleton,
+  PriorityChip,
+} from '../components/ui';
+import { ripple } from '../motion';
+import { colors, priorityColor, radius, spacing, typography, withAlpha } from '../theme';
 import { setUnread } from '../unread';
 
 type Tab = 'all' | 'unread';
@@ -31,7 +32,7 @@ export default function NotificationsScreen() {
       setItems(all);
       setUnread(all.filter((n) => !n.read).length);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load notifications');
+      setError(messageOf(e, 'Failed to load notifications'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -40,7 +41,7 @@ export default function NotificationsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      load();
+      void load();
     }, [load]),
   );
 
@@ -54,34 +55,40 @@ export default function NotificationsScreen() {
         return next;
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not mark as read');
+      setError(messageOf(e, 'Could not mark as read'));
     }
   }, []);
 
-  const visible = tab === 'unread' ? items.filter((n) => !n.read) : items;
+  const unreadCount = items.filter((n) => !n.read).length;
+  const visible = useMemo(
+    () => (tab === 'unread' ? items.filter((n) => !n.read) : items),
+    [tab, items],
+  );
 
   return (
     <View style={styles.screen}>
       <View style={styles.tabs}>
         {(['all', 'unread'] as Tab[]).map((t) => (
-          <TouchableOpacity
+          <Chip
             key={t}
-            style={[styles.tab, tab === t && styles.tabActive]}
+            label={t === 'all' ? `All (${items.length})` : `Unread (${unreadCount})`}
+            accessibilityLabel={
+              t === 'all' ? `All notifications, ${items.length}` : `Unread notifications, ${unreadCount}`
+            }
+            active={tab === t}
             onPress={() => setTab(t)}
-          >
-            <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
-              {t === 'all' ? 'All' : `Unread (${items.filter((n) => !n.read).length})`}
-            </Text>
-          </TouchableOpacity>
+          />
         ))}
       </View>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? (
+        <View style={styles.bannerWrap}>
+          <ErrorBanner message={error} onRetry={() => void load()} />
+        </View>
+      ) : null}
 
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
+        <ListSkeleton label="Loading notifications" rows={6} />
       ) : (
         <FlatList
           data={visible}
@@ -90,35 +97,49 @@ export default function NotificationsScreen() {
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
+              tintColor={colors.primary}
               onRefresh={() => {
                 setRefreshing(true);
-                load();
+                void load();
               }}
             />
           }
-          ListEmptyComponent={<Text style={styles.empty}>No notifications.</Text>}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[styles.card, !item.read && styles.cardUnread]}
-              onPress={() => markRead(item)}
-              activeOpacity={0.8}
-            >
-              <View style={styles.header}>
-                {!item.read ? <View style={styles.dot} /> : null}
-                <Text style={styles.title}>{item.title}</Text>
-                <Text
-                  style={[styles.priority, { color: priorityColor[item.priority] ?? colors.muted }]}
-                >
-                  {item.priority}
-                </Text>
-              </View>
-              {item.body ? <Text style={styles.body}>{item.body}</Text> : null}
-              <Text style={styles.meta}>
-                {item.entity_type ? `${item.entity_type} ${item.entity_ref ?? ''} · ` : ''}
-                {new Date(item.created_at).toLocaleString()}
-              </Text>
-            </TouchableOpacity>
-          )}
+          ListEmptyComponent={
+            <EmptyState
+              title={tab === 'unread' ? 'You are all caught up' : 'No notifications'}
+              hint={tab === 'unread' ? 'Nothing needs your attention.' : 'Updates will land here.'}
+            />
+          }
+          renderItem={({ item }) => {
+            const tone = priorityColor[item.priority] ?? colors.muted;
+            return (
+              <Pressable
+                onPress={() => void markRead(item)}
+                style={({ pressed }) => [styles.card, !item.read && styles.cardUnread, pressed && styles.cardPressed]}
+                accessibilityRole="button"
+                accessibilityLabel={item.title}
+                accessibilityHint={item.read ? 'Notification' : 'Unread notification, marks it as read'}
+                accessibilityState={{ selected: !item.read }}
+                {...ripple(colors.primary)}
+              >
+                <View style={[styles.rail, { backgroundColor: tone }]} />
+                <View style={styles.flex}>
+                  <View style={styles.header}>
+                    {!item.read ? <View style={styles.dot} /> : null}
+                    <Text style={styles.title} numberOfLines={2}>
+                      {item.title}
+                    </Text>
+                    <PriorityChip priority={item.priority} />
+                  </View>
+                  {item.body ? <Text style={styles.body}>{item.body}</Text> : null}
+                  <Text style={typography.caption} numberOfLines={1}>
+                    {item.entity_type ? `${item.entity_type.replace(/_/g, ' ')} ${item.entity_ref ?? ''} · ` : ''}
+                    {new Date(item.created_at).toLocaleString()}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          }}
         />
       )}
     </View>
@@ -127,41 +148,25 @@ export default function NotificationsScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  flex: { flex: 1 },
   tabs: { flexDirection: 'row', padding: spacing.md, gap: spacing.sm },
-  tab: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    borderRadius: 20,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  tabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  tabText: { color: colors.muted, fontWeight: '600' },
-  tabTextActive: { color: '#fff' },
-  list: { padding: spacing.md, paddingTop: 0 },
-  empty: { textAlign: 'center', color: colors.muted, marginTop: spacing.xl },
-  error: { color: colors.danger, paddingHorizontal: spacing.md },
+  bannerWrap: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
+  list: { padding: spacing.md, paddingTop: 0, paddingBottom: spacing.xxl },
   card: {
+    flexDirection: 'row',
+    gap: spacing.md,
     backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: spacing.lg,
+    borderRadius: radius.lg,
+    padding: spacing.md,
     marginBottom: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  cardUnread: { borderColor: colors.primary, backgroundColor: '#f8fbff' },
-  header: { flexDirection: 'row', alignItems: 'center' },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.primary,
-    marginRight: spacing.sm,
-  },
-  title: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.text },
-  priority: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
-  body: { color: colors.muted, marginTop: spacing.xs },
-  meta: { color: colors.muted, fontSize: 11, marginTop: spacing.sm, textTransform: 'capitalize' },
+  cardUnread: { borderColor: colors.primary, backgroundColor: withAlpha(colors.primary, 0.05) },
+  cardPressed: { opacity: 0.75 },
+  rail: { width: 3, borderRadius: 2 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.primary },
+  title: { ...typography.body, fontWeight: '700', flexShrink: 1 },
+  body: { ...typography.bodyMuted, marginTop: 4 },
 });

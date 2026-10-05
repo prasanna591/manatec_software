@@ -84,3 +84,37 @@ def requires(module: str, action: str):
         return user
 
     return _check
+
+
+def requires_any(*pairs: tuple[str, str]):
+    """Accept a user holding *any one* of several (module, action) grants.
+
+    Needed where two different roles legitimately perform the same action, and
+    forcing a single permission would exclude one of them. Closing a visit is
+    the case in point: the host department records the outcome (`edit`) while
+    management can also close one on their behalf (`approve`), and the FRS matrix
+    deliberately does not grant both to the same roles.
+
+    Usage: Depends(requires_any(("Visits", "edit"), ("Visits", "approve"))).
+    """
+
+    def _check(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> User:
+        if user.role.code == "ADMIN":
+            return user
+        for module, action in pairs:
+            allowed = db.scalar(
+                select(Permission.id).where(
+                    Permission.role_id == user.role_id,
+                    Permission.module == module,
+                    Permission.action == action,
+                )
+            )
+            if allowed:
+                return user
+        wanted = " or ".join(f"{action} on {module}" for module, action in pairs)
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            f"Role {user.role.code} lacks {wanted}",
+        )
+
+    return _check

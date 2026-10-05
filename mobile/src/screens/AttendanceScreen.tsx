@@ -1,18 +1,48 @@
 import { useCallback, useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '../api/client';
 import type { AttendanceRow, Roster, RosterRow } from '../api/types';
-import { colors, spacing } from '../theme';
+import { messageOf } from '../auth/session';
+import {
+  Badge,
+  Button,
+  Card,
+  Divider,
+  EmptyState,
+  ErrorBanner,
+  Monogram,
+  ScreenSkeleton,
+  SectionHeader,
+} from '../components/ui';
+import { colors, radius, spacing, typography } from '../theme';
+
+const STATUS_COLOR: Record<AttendanceRow['status'], string> = {
+  absent: colors.danger,
+  present: colors.ok,
+  checked_out: colors.muted,
+};
+
+const STATUS_LABEL: Record<AttendanceRow['status'], string> = {
+  absent: 'NOT CHECKED IN',
+  present: 'ON SITE',
+  checked_out: 'CHECKED OUT',
+};
+
+/** Backend serializes check_in/check_out as ISO datetime strings. */
+function hhmm(iso: string | null | undefined): string {
+  if (!iso) return '--:--';
+  const m = /T(\d{2}:\d{2})/.exec(iso);
+  return m ? m[1] : '--:--';
+}
+
+function formatDay(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' });
+}
 
 export default function AttendanceScreen() {
   const [today, setToday] = useState<AttendanceRow | null>(null);
@@ -32,10 +62,10 @@ export default function AttendanceScreen() {
       try {
         setRoster(await api.attendanceRoster());
       } catch {
-        setRoster(null); // not a dept head / HR → no roster
+        setRoster(null);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load attendance');
+      setError(messageOf(e, 'Failed to load attendance'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -44,18 +74,19 @@ export default function AttendanceScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      load();
+      void load();
     }, [load]),
   );
 
   const act = useCallback(
     async (fn: () => Promise<AttendanceRow>) => {
       setBusy(true);
+      setError(null);
       try {
         setToday(await fn());
         setHistory(await api.attendanceMe());
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'Action failed');
+        setError(messageOf(e, 'Action failed'));
       } finally {
         setBusy(false);
       }
@@ -63,87 +94,104 @@ export default function AttendanceScreen() {
     [],
   );
 
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
-  }
+  if (loading) return <ScreenSkeleton label="Loading attendance" rows={6} />;
 
   const status = today?.status ?? 'absent';
-  const statusMeta = {
-    absent: { label: 'NOT CHECKED IN', color: colors.danger },
-    present: { label: 'ON SITE', color: colors.ok },
-    checked_out: { label: 'CHECKED OUT', color: colors.muted },
-  }[status];
+  const tone = STATUS_COLOR[status];
 
   return (
     <FlatList<AttendanceRow>
       style={styles.screen}
       data={history}
-      keyExtractor={(r) => `${r.work_date}-${r.id}`}
+      keyExtractor={(r) => `${r.work_date}-${r.id ?? 'n'}`}
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          tintColor={colors.primary}
+          onRefresh={() => {
+            setRefreshing(true);
+            void load();
+          }}
+        />
+      }
       ListHeaderComponent={
         <View>
-          <Text style={styles.sectionLabel}>TODAY</Text>
-          <View style={styles.card}>
-            <View style={styles.todayRow}>
-              <Text style={styles.date}>{new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' })}</Text>
-              <View style={[styles.badge, { backgroundColor: statusMeta.color }]}>
-                <Text style={styles.badgeText}>{statusMeta.label}</Text>
+          {error ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
+
+          <SectionHeader label="Today" />
+          <Card style={styles.hero}>
+            <View style={styles.heroTop}>
+              <View style={styles.flex}>
+                <Text style={styles.heroDate}>{formatDay(today?.work_date ?? new Date().toISOString())}</Text>
+                <Text style={typography.caption}>
+                  {today?.minutes != null
+                    ? `${Math.floor(today.minutes / 60)}h ${today.minutes % 60}m worked`
+                    : 'No hours logged yet'}
+                </Text>
               </View>
+              <Badge label={STATUS_LABEL[status]} color={tone} />
             </View>
+
             <View style={styles.timeRow}>
-              <TimeBox label="CHECK IN" value={today?.check_in} />
-              <Text style={styles.arrow}>→</Text>
-              <TimeBox label="CHECK OUT" value={today?.check_out} />
+              <TimeBox label="CHECK IN" value={hhmm(today?.check_in)} accent={tone} />
+              <Ionicons name="arrow-forward" size={16} color={colors.textLight} />
+              <TimeBox label="CHECK OUT" value={hhmm(today?.check_out)} />
             </View>
-            {today?.minutes != null ? (
-              <Text style={styles.minutes}>worked {Math.floor(today.minutes / 60)}h {today.minutes % 60}m</Text>
+
+            {status === 'absent' ? (
+              <Button
+                label="Check in"
+                onPress={() => void act(api.attendanceCheckIn)}
+                loading={busy}
+                style={styles.heroBtn}
+              />
             ) : null}
-            <View style={styles.btnRow}>
-              {status === 'absent' ? (
-                <TouchableOpacity style={[styles.btn, styles.btnPrimary]} disabled={busy} onPress={() => act(api.attendanceCheckIn)} activeOpacity={0.8}>
-                  <Text style={styles.btnPrimaryText}>{busy ? '…' : 'CHECK IN'}</Text>
-                </TouchableOpacity>
-              ) : null}
-              {status === 'present' ? (
-                <TouchableOpacity style={[styles.btn, styles.btnOut]} disabled={busy} onPress={() => act(api.attendanceCheckOut)} activeOpacity={0.8}>
-                  <Text style={styles.btnOutText}>{busy ? '…' : 'CHECK OUT'}</Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-          </View>
+            {status === 'present' ? (
+              <Button
+                label="Check out"
+                variant="secondary"
+                onPress={() => void act(api.attendanceCheckOut)}
+                loading={busy}
+                style={styles.heroBtn}
+              />
+            ) : null}
+            {status === 'checked_out' ? (
+              <Text style={styles.closedNote}>Day closed. See you tomorrow.</Text>
+            ) : null}
+          </Card>
 
           {roster ? <RosterCard roster={roster} /> : null}
 
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-
-          <Text style={styles.sectionLabel}>HISTORY</Text>
+          <SectionHeader label="History" />
         </View>
       }
-      ListEmptyComponent={<Text style={styles.empty}>No attendance records yet.</Text>}
+      ListEmptyComponent={
+        <EmptyState title="No attendance records" hint="Your check-ins will appear here." />
+      }
       renderItem={({ item }) => (
-        <View style={styles.rowCard}>
-          <Text style={styles.rowDate}>{item.work_date}</Text>
-          <Text style={styles.rowTime}>
-            {item.check_in ? item.check_in.slice(11, 16) : '—'} → {item.check_out ? item.check_out.slice(11, 16) : '—'}
+        <Card style={styles.rowCard} level={1}>
+          <View style={[styles.dot, { backgroundColor: STATUS_COLOR[item.status] }]} />
+          <View style={styles.flex}>
+            <Text style={styles.rowDate}>{item.work_date}</Text>
+            <Text style={typography.caption}>
+              {hhmm(item.check_in)} → {hhmm(item.check_out)}
+              {item.minutes != null ? ` · ${Math.floor(item.minutes / 60)}h ${item.minutes % 60}m` : ''}
+            </Text>
+          </View>
+          <Text style={[styles.rowStatus, { color: STATUS_COLOR[item.status] }]}>
+            {item.status === 'checked_out' ? 'Done' : item.status}
           </Text>
-          <Text style={[styles.rowStatus, { color: item.status === 'absent' ? colors.danger : colors.muted }]}>
-            {item.status}
-          </Text>
-        </View>
+        </Card>
       )}
     />
   );
 }
 
-function TimeBox({ label, value }: { label: string; value: string | null }) {
+function TimeBox({ label, value, accent }: { label: string; value: string; accent?: string }) {
   return (
-    <View style={styles.timeBox}>
-      <Text style={styles.timeValue}>{value ? value.toISOString().slice(11, 16) : '--:--'}</Text>
+    <View style={[styles.timeBox, accent && { borderColor: accent }]}>
+      <Text style={[styles.timeValue, accent && { color: accent }]}>{value}</Text>
       <Text style={styles.timeLabel}>{label}</Text>
     </View>
   );
@@ -153,90 +201,95 @@ function RosterCard({ roster }: { roster: Roster }) {
   const [collapsed, setCollapsed] = useState(false);
   const here = roster.rows.filter((r: RosterRow) => r.attendance?.check_in && !r.attendance?.check_out).length;
   return (
-    <View style={styles.card}>
-      <TouchableOpacity onPress={() => setCollapsed(!collapsed)} activeOpacity={0.8}>
-        <View style={styles.todayRow}>
-          <Text style={styles.cardTitle}>Department · {roster.dept ?? '—'}</Text>
-          <Text style={styles.cardSub}>{here} on site · {roster.rows.length} staff</Text>
+    <Card style={styles.rosterCard}>
+      <Pressable
+        onPress={() => setCollapsed((c) => !c)}
+        style={styles.rosterHead}
+        accessibilityRole="button"
+      >
+        <View style={styles.flex}>
+          <Text style={styles.cardTitle}>Team roster</Text>
+          <Text style={typography.caption}>
+            {roster.dept ?? 'All departments'} · {here} on site · {roster.rows.length} staff
+          </Text>
         </View>
-      </TouchableOpacity>
+        <Ionicons
+          name={collapsed ? 'chevron-down' : 'chevron-up'}
+          size={18}
+          color={colors.textLight}
+        />
+      </Pressable>
+
       {!collapsed ? (
-        <View style={{ marginTop: spacing.sm }}>
+        <View style={styles.rosterBody}>
+          <Divider />
           {roster.rows.map((r) => (
             <View key={r.employee_id} style={styles.rosterRow}>
-              <Text style={[styles.rosterName, { fontWeight: r.attendance ? '700' : '400' }]}>{r.name}</Text>
-              <Text style={styles.rosterMeta}>
-                {r.attendance?.check_in ? r.attendance.check_in.slice(11, 16) : 'absent'}
-                {r.attendance?.check_out ? ` → ${r.attendance.check_out.slice(11, 16)}` : ''}
+              <Monogram label={r.name} seed={r.employee_id} size={32} />
+              <View style={styles.flex}>
+                <Text style={styles.rosterName}>{r.name}</Text>
+                <Text style={typography.caption}>{r.code}</Text>
+              </View>
+              <Text
+                style={[
+                  styles.rosterMeta,
+                  r.attendance?.check_in && { color: colors.ok, fontWeight: '700' },
+                ]}
+              >
+                {r.attendance?.check_in ? hhmm(r.attendance.check_in) : 'absent'}
               </Text>
             </View>
           ))}
         </View>
       ) : null}
-    </View>
+    </Card>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  content: { padding: spacing.lg, paddingBottom: spacing.xl },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
-  sectionLabel: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1,
-    marginTop: spacing.lg,
-    marginBottom: spacing.sm,
+  flex: { flex: 1 },
+  content: { padding: spacing.md, paddingBottom: spacing.xxl },
+  hero: {
+    backgroundColor: colors.primaryDeep,
+    borderColor: colors.primaryDeep,
   },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: spacing.lg,
+  heroTop: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  heroDate: { ...typography.title, color: '#ffffff' },
+  timeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginVertical: spacing.lg,
+  },
+  timeBox: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
-  todayRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  date: { fontSize: 16, fontWeight: '700', color: colors.text },
-  badge: { borderRadius: 10, paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
-  badgeText: { color: '#fff', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
-  timeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.lg },
-  timeBox: { alignItems: 'center', flex: 1 },
-  timeValue: { fontSize: 30, fontWeight: '700', color: colors.text },
-  timeLabel: { color: colors.muted, fontSize: 11, letterSpacing: 1, marginTop: spacing.xs },
-  arrow: { color: colors.muted, fontSize: 20, marginHorizontal: spacing.lg },
-  minutes: { textAlign: 'center', color: colors.muted, marginTop: spacing.sm, fontSize: 12 },
-  btnRow: { marginTop: spacing.lg },
-  btn: { borderRadius: 10, paddingVertical: spacing.md, alignItems: 'center' },
-  btnPrimary: { backgroundColor: colors.primary },
-  btnPrimaryText: { color: '#fff', fontWeight: '700', letterSpacing: 0.5 },
-  btnOut: { backgroundColor: colors.okSoft },
-  btnOutText: { color: colors.ok, fontWeight: '700', letterSpacing: 0.5 },
-  error: { color: colors.danger, marginTop: spacing.md },
-  cardTitle: { fontSize: 15, fontWeight: '700', color: colors.text, flex: 1 },
-  cardSub: { color: colors.muted, fontSize: 12 },
+  timeValue: { ...typography.title, color: '#ffffff' },
+  timeLabel: { ...typography.caption, color: 'rgba(255,255,255,0.7)', marginTop: 4, letterSpacing: 0.8 },
+  heroBtn: { marginTop: spacing.xs },
+  closedNote: { ...typography.caption, color: 'rgba(255,255,255,0.8)', textAlign: 'center', marginTop: spacing.sm },
+  rosterCard: { marginTop: spacing.lg },
+  rosterHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  cardTitle: { ...typography.section },
+  rosterBody: { marginTop: spacing.md },
   rosterRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  rosterName: { color: colors.text, fontSize: 14 },
-  rosterMeta: { color: colors.muted, fontSize: 13 },
-  rowCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: 10,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
   },
-  rowDate: { color: colors.text, fontWeight: '600', flex: 1 },
-  rowTime: { color: colors.muted, fontSize: 13 },
-  rowStatus: { textTransform: 'capitalize', fontSize: 12, fontWeight: '700', marginLeft: spacing.sm },
-  empty: { textAlign: 'center', color: colors.muted, marginTop: spacing.lg },
+  rosterName: { ...typography.body, fontWeight: '600' },
+  rosterMeta: { ...typography.caption, color: colors.muted, fontWeight: '600' },
+  rowCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.sm },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  rowDate: { ...typography.body, fontWeight: '600' },
+  rowStatus: { ...typography.caption, fontWeight: '700', textTransform: 'capitalize' },
 });

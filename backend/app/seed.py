@@ -78,6 +78,12 @@ _MATRIX: dict[str, list[str]] = {
     # Manufactured catalogue, item master & BOM/ATP (ported from manatec_platform).
     "Catalog":      ["RX", "RX", "R",  "R",  "R",  "RCE","R",  "R",  "R",  "RCE","RCE","-",  "R"],
     "BOM":          ["R",  "RCEA","RCE","RCE","-",  "R",  "R",  "-",  "R",  "RCEA","-", "-",  "-"],
+    # Common company-wide service: any employee may raise a visit (RC), the host
+    # department owns the workflow, and management approves the closed outcome.
+    "Visits":       ["RCA", "RCEA","RCE", "RCE", "RC",  "RC", "RCE", "RCE", "RC", "RCE", "RCE", "RCE", "R"],
+    # Location is deliberately narrower than the visit itself. Without this the
+    # production floor could read a buyer's live position.
+    "BuyerTracking":["R",   "R",   "R",   "-",   "-",   "-",  "R",  "R",  "-",  "-",   "R",   "R",   "-"],
 }
 # role columns in the same order as _MATRIX rows
 _COLS = ["MGMT", "DH", "SUP", "PLNR", "OPER", "STORE", "PUR", "LOG", "QINSP", "ENG", "COMM", "HR", "ACC"]
@@ -674,6 +680,190 @@ def seed_hr(db: Session) -> None:
                    body="Plant maintenance shutdown on " + today_s, entity_type="notice")
 
 
+def seed_workshop(db: Session) -> None:
+    """Demo rows for the visit register, quality loop and machine shop.
+
+    Without these the three modules open empty and a reviewer cannot tell a
+    working workflow from a missing endpoint. Idempotent: each block is guarded
+    by a "table already has rows" check.
+    """
+    from datetime import date, datetime, timedelta, timezone
+
+    from .config import get_settings
+    from .models import (
+        Department, Employee, Inspection, Machine, MachineDowntime, Ncr, User, Visit,
+    )
+
+    if not get_settings().seed_demo:
+        return
+
+    now = datetime.now(timezone.utc)
+    today = date.today()
+
+    def user(username: str) -> User | None:
+        return db.scalar(select(User).where(User.username == username))
+
+    def dept(code: str) -> Department | None:
+        return db.scalar(select(Department).where(Department.code == code))
+
+    def emp_of(u: User | None) -> Employee | None:
+        return db.get(Employee, u.employee_id) if u and u.employee_id else None
+
+    host = user("manager")
+    purchase = user("purchase")
+    commercial = user("commercial")
+    quality = user("quality")
+    operator = user("operator")
+    prod_sup = user("prod_sup")
+    logistics = user("logistics")
+    engineer = user("engineer")
+
+    # ── visits ─────────────────────────────────────────────────────────
+    if not db.scalar(select(Visit.id)):
+        db.add_all([
+            Visit(
+                visit_no="VB2609-0001", visit_type="buyer",
+                visitor_name="Rajesh Iyer", company="ABC Motors, Chennai",
+                contact="98400 22331", purpose="Product inspection of Fox 3D wheel aligner",
+                requirement="Approval for 6 units against PO", host_user_id=(commercial or host).id if (commercial or host) else None,
+                department_id=dept("COMM").id if dept("COMM") else None,
+                visit_date=today, expected_time="10:30", food_arrangement="lunch",
+                transport_required=False, vehicle_no="TN-07-AX-4412",
+                status="confirmed", tracking_enabled=True, eta_minutes=25,
+                latitude=13.0827, longitude=80.2707, location_note_tracking="Peelamedu crossroad",
+                location_updated_at=now - timedelta(minutes=4),
+                created_by=(commercial or host).id if (commercial or host) else None,
+                confirmed_at=now - timedelta(hours=2),
+            ),
+            Visit(
+                visit_no="VS2609-0002", visit_type="supplier",
+                visitor_name="Deepak Rao", company="Precision Bearings & Fasteners",
+                contact="98400 55667", purpose="Discuss new wheel-aligner bearing supply",
+                requirement="Prototype approval, 200 nos sample required",
+                host_user_id=(purchase or host).id if (purchase or host) else None,
+                department_id=dept("PURC").id if dept("PURC") else None,
+                visit_date=today + timedelta(days=1), expected_time="11:00",
+                food_arrangement="lunch", transport_required=True,
+                status="created", created_by=(purchase or host).id if (purchase or host) else None,
+            ),
+            Visit(
+                visit_no="VC2608-0011", visit_type="customer",
+                visitor_name="Anitha Menon", company="Highline Garage Systems",
+                contact="90000 77889", purpose="Service complaint review — turntable noise",
+                requirement="Replacement of turntable assembly under warranty",
+                host_user_id=(prod_sup or host).id if (prod_sup or host) else None,
+                department_id=dept("PROD").id if dept("PROD") else None,
+                visit_date=today - timedelta(days=1), expected_time="15:30",
+                food_arrangement="refreshments", status="meeting",
+                outcome_sample=True, next_action="Send replacement turntable quotation",
+                arrived_at=now - timedelta(days=1, hours=2), meeting_at=now - timedelta(days=1, hours=1),
+                created_by=(prod_sup or host).id if (prod_sup or host) else None,
+            ),
+        ])
+        db.commit()
+
+    # ── quality ────────────────────────────────────────────────────────
+    if not db.scalar(select(Inspection.id)):
+        incoming = Inspection(
+            insp_no="IQ2609-0001", kind="incoming", ref_type="grn", ref_no="GRN-0118",
+            product_name="Bearing 6204-2RS", qty=200, result="pass", severity="minor",
+            checklist=[
+                {"key": "material_grade", "label": "Material grade matches PO", "result": "pass", "remark": ""},
+                {"key": "qty", "label": "Received quantity as per GRN", "result": "pass", "remark": ""},
+                {"key": "damage", "label": "No transit damage", "result": "pass", "remark": ""},
+                {"key": "certs", "label": "Test certificates / COC present", "result": "pass", "remark": ""},
+                {"key": "marking", "label": "Item marking and labelling legible", "result": "pass", "remark": ""},
+                {"key": "storage", "label": "Storage condition acceptable", "result": "pass", "remark": ""},
+            ],
+            remarks="COC from supplier received with the lot.",
+            inspector_id=(quality or host).id if (quality or host) else None,
+            inspector_name=(emp_of(quality).name if emp_of(quality) else "Ganesh Quality"),
+            inspected_at=now - timedelta(days=1, hours=4), created_by=(quality or host).id if (quality or host) else None,
+        )
+        db.add(incoming)
+        db.flush()
+
+        final_fail = Inspection(
+            insp_no="FQ2609-0002", kind="final", ref_type="production_order", ref_no="PO00007",
+            product_name="Fox 3D Wheel Aligner", serial_no="WA-2026-00482", qty=1,
+            result="fail", severity="major",
+            checklist=[
+                {"key": "frame", "label": "Frame alignment and rigidity", "result": "pass", "remark": ""},
+                {"key": "sensor", "label": "Sensor alignment / calibration", "result": "fail",
+                 "remark": "Camera sensor 1.4 degrees off, outside 1 degree tolerance"},
+                {"key": "electronics", "label": "Electronics and wiring", "result": "pass", "remark": ""},
+                {"key": "software", "label": "Software build and calibration pass", "result": "pass", "remark": ""},
+                {"key": "safety", "label": "Safety interlock and emergency stop test", "result": "pass", "remark": ""},
+                {"key": "accessories", "label": "Accessories and documents packed", "result": "na", "remark": ""},
+            ],
+            remarks="Sensor mounting bracket appears misaligned on assembly.",
+            inspector_id=(quality or host).id if (quality or host) else None,
+            inspector_name=(emp_of(quality).name if emp_of(quality) else "Ganesh Quality"),
+            inspected_at=now - timedelta(hours=2), created_by=(quality or host).id if (quality or host) else None,
+        )
+        db.add(final_fail)
+        db.flush()
+
+        ncr = Ncr(
+            ncr_no="NCR2609-0001", title="Sensor alignment out of tolerance — Fox 3D",
+            issue="Camera sensor 1.4 degrees off during final QC; bracket mounting reference drifted.",
+            detected_at="final", ref_no="FQ2609-0002", severity="major", status="corrective",
+            qty_affected=1, assigned_to=(prod_sup or host).id if (prod_sup or host) else None,
+            department_id=dept("PROD").id if dept("PROD") else None,
+            root_cause="Bracket machining tolerance on the sensor mount was 0.4 mm wider than drawing.",
+            due_date=today + timedelta(days=2), created_by=(quality or host).id if (quality or host) else None,
+            created_at=now - timedelta(hours=2),
+        )
+        db.add(ncr)
+        db.flush()
+        final_fail.ncr_id = ncr.id
+
+        db.add(Inspection(
+            insp_no="PQ2609-0003", kind="in_process", ref_type="production_order", ref_no="PO00008",
+            product_name="Wheel Balancer 3D", qty=1, result="pending", severity="minor",
+            checklist=[], created_by=(quality or host).id if (quality or host) else None,
+        ))
+        db.commit()
+
+    # ── machine shop ───────────────────────────────────────────────────
+    if not db.scalar(select(Machine.id)):
+        db.add_all([
+            Machine(code="CNC-01", name="Vertical Machining Centre VMC-850", work_center="Machine Shop",
+                    status="running", current_job="PO00007", part_no="WA-FRAME-042",
+                    operator_name="Arun Operator", job_started_at=now - timedelta(minutes=42),
+                    est_completion=now + timedelta(minutes=58), utilization_pct=82, tool_life_pct=74, oee_pct=78),
+            Machine(code="CNC-02", name="CNC Turning Centre TC-500", work_center="Machine Shop",
+                    status="idle", utilization_pct=61, tool_life_pct=88, oee_pct=60),
+            Machine(code="CNC-03", name="Vertical Machining Centre VMC-1000", work_center="Machine Shop",
+                    status="maintenance", utilization_pct=74, tool_life_pct=31, oee_pct=70),
+            Machine(code="CNC-04", name="CNC Milling 5-Axis", work_center="Tool Room",
+                    status="running", current_job="PO00008", part_no="WB-BRACKET-11",
+                    operator_name="Ravi Purchase", job_started_at=now - timedelta(minutes=15),
+                    utilization_pct=88, tool_life_pct=52, oee_pct=81),
+            Machine(code="PRESS-01", name="Hydraulic Press 100T", work_center="Fabrication",
+                    status="idle", utilization_pct=55, tool_life_pct=95, oee_pct=52),
+        ])
+        db.flush()
+        db.add_all([
+            MachineDowntime(machine_id=3, reason="tool_breakage",
+                            started_at=now - timedelta(hours=3), ended_at=now - timedelta(hours=2, minutes=25),
+                            minutes=35, resolution="Broken drill replaced from tool crib.",
+                            reported_by="prod_sup", reported_role="SUP"),
+            MachineDowntime(machine_id=2, reason="material_unavailable",
+                            started_at=now - timedelta(days=1, hours=5), ended_at=now - timedelta(days=1, hours=3),
+                            minutes=120, resolution="Stores issued bar stock from MAIN.",
+                            reported_by="operator", reported_role="OPER"),
+            MachineDowntime(machine_id=3, reason="maintenance",
+                            started_at=now - timedelta(minutes=90), minutes=0,
+                            resolution="", reported_by="prod_sup", reported_role="SUP"),
+            MachineDowntime(machine_id=1, reason="setup",
+                            started_at=now - timedelta(days=2, hours=2), ended_at=now - timedelta(days=2, hours=1, minutes=10),
+                            minutes=50, resolution="Fixture changeover for PO00007.",
+                            reported_by="operator", reported_role="OPER"),
+        ])
+        db.commit()
+
+
 def init_db() -> None:
     from . import models  # noqa: F401  (register models on Base.metadata)
     from .config import get_settings
@@ -687,6 +877,7 @@ def init_db() -> None:
         if get_settings().seed_demo:
             seed_demo(db)
         seed_hr(db)
+        seed_workshop(db)
         sync_all(db)   # FRS 18.5 — populate ERP cache at startup
         from .stores_service import init_balances_from_erp
 

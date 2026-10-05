@@ -41,6 +41,13 @@ def order_detail(order_id: int, db: Session = Depends(get_db),
     return production_service.order_view(db, _order_404(db, order_id))
 
 
+@router.get("/orders/{order_id}/transitions")
+def valid_transitions(order_id: int, db: Session = Depends(get_db),
+                      _: User = Depends(requires("Production", "view"))):
+    order = _order_404(db, order_id)
+    return {"current": order.status, "allowed": production_service.get_valid_transitions(order.status)}
+
+
 @router.post("/orders", status_code=201)
 def create_order(body: ProductionOrderIn, db: Session = Depends(get_db),
                  actor: User = Depends(requires("Production", "create"))):

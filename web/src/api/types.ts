@@ -39,6 +39,13 @@ export interface DepartmentStatus {
   status: 'attention' | 'normal';
 }
 
+export interface EmployeeDashboardStats {
+  total: number;
+  by_department: { dept_code: string; dept_name: string; count: number }[];
+  by_role: { role_code: string; role_name: string; count: number }[];
+  trend: { month: string; headcount: number }[];
+}
+
 export interface Activity {
   at: string;
   actor: string;
@@ -86,6 +93,31 @@ export interface Employee {
   name: string;
   department_id: number | null;
   active: boolean;
+}
+
+export type EmployeeImportStatus = 'created' | 'updated' | 'failed';
+
+export interface EmployeeImportRow {
+  row: number;
+  employee_code: string;
+  status: EmployeeImportStatus;
+  detail: string;
+  /** Present only when the row also provisioned a mobile login. */
+  username?: string;
+  password?: string;
+  role_code?: string;
+}
+
+export interface EmployeeImportResult {
+  ok: boolean;
+  rows: number;
+  employees_created: number;
+  employees_updated: number;
+  accounts_created: number;
+  failed: number;
+  /** Credentials are returned exactly once -- the server never stores them in clear. */
+  accounts: EmployeeImportRow[];
+  results: EmployeeImportRow[];
 }
 
 export interface Role {

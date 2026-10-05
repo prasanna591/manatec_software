@@ -23,13 +23,16 @@ from .routers import (
     integration,
     inventory,
     leave,
+    machines,
     notifications,
     procurement,
     production,
+    quality,
     quotes,
     search,
     stores,
     tasks,
+    visits,
 )
 
 log = logging.getLogger("manatec")
@@ -80,6 +83,9 @@ for r in (
     leave,
     guests,
     announcements,
+    visits,
+    quality,
+    machines,
 ):
     app.include_router(r.router, prefix=API)
 

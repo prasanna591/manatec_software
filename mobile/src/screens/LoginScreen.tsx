@@ -1,166 +1,239 @@
-import { View, Text, TextInput, TouchableOpacity, Alert, StyleSheet } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useState } from 'react';
+import {
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
 import { useAuth } from '../auth/AuthContext';
-import { api } from '../api/client';
+import { Button, ErrorBanner } from '../components/ui';
+import { ripple } from '../motion';
+import { colors, radius, spacing, typography, withAlpha } from '../theme';
 
-export function LoginScreen() {
-  const { user, initializing, authError } = useAuth();
-  const [username, setUsername] = useState('manager');
-  const [password, setPassword] = useState('demo123');
-  const [error, setError] = useState<string | null>(null);
+const DEMO_ACCOUNTS = [
+  { username: 'admin', password: 'admin123', role: 'ADMIN', label: 'Administrator' },
+  { username: 'manager', password: 'demo123', role: 'MGMT', label: 'Plant Manager' },
+  { username: 'stores', password: 'demo123', role: 'STORE', label: 'Stores' },
+  { username: 'purchase', password: 'demo123', role: 'PUR', label: 'Purchase' },
+  { username: 'planner', password: 'demo123', role: 'PLNR', label: 'Planning' },
+  { username: 'hr', password: 'demo123', role: 'HR', label: 'HR Officer' },
+];
 
-  useFocusEffect(
-    () => {
-      setUsername('manager');
-      setPassword('demo123');
-      setError(null);
-      return () => {};
-    },
-    [username, password],
-  );
+export default function LoginScreen() {
+  const { signIn, signingIn, authError } = useAuth();
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
 
-  const handleLogin = async () => {
+  const submit = async () => {
+    if (!username.trim() || !password) {
+      setLocalError('Enter both username and password.');
+      return;
+    }
+    setLocalError(null);
     try {
-      setError(null);
-      await api.login(username, password);
-      // After login, the AuthProvider useEffect will run and set up the session
-    } catch (e: any) {
-      setError(e instanceof Error ? e.message : 'Login failed');
+      await signIn(username, password);
+    } catch {
+      // surfaced through authError
     }
   };
 
-  if (initializing) return null;
+  const useDemo = (u: string, p: string) => {
+    setUsername(u);
+    setPassword(p);
+    setLocalError(null);
+  };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Manatec Digital</Text>
-        <Text style={styles.subtitle}>Sign in to continue</Text>
+    <View style={styles.root}>
+      <View style={styles.hero}>
+        <View style={styles.heroBlobOne} />
+        <View style={styles.heroBlobTwo} />
+        <Image source={require('../../assets/icon.png')} style={styles.logo} />
+        <Text style={styles.brand}>Manatec Digital</Text>
+        <Text style={styles.brandSub}>Plant operations, in your pocket</Text>
       </View>
 
-      <View style={styles.inputContainer}>
-        <TextInput
-          placeholder="Username"
-          value={username}
-          onChangeText={setUsername}
-          style={styles.input}
-          autoCapitalize="none"
-        />
-        <TextInput
-          placeholder="Password"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-          style={styles.input}
-        />
-      </View>
+      <KeyboardAvoidingView
+        style={styles.sheet}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={styles.sheetContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={typography.title}>Sign in</Text>
+          <Text style={styles.sheetHint}>Use your plant credentials to continue.</Text>
 
-      <TouchableOpacity style={styles.btn} onPress={handleLogin} disabled={initializing}>
-        {initializing ? (
-          <Text style={styles.btnText}>Signing in…</Text>
-        ) : (
-          <Text style={styles.btnText}>Sign in</Text>
-        )}
-      </TouchableOpacity>
+          {authError || localError ? (
+            <ErrorBanner message={localError ?? (authError as string)} />
+          ) : null}
 
-      {authError && (
-        <View style={styles.error}>
-          <Text style={styles.errorText}>{authError}</Text>
-        </View>
-      )}
+          <View style={styles.field}>
+            <Text style={styles.label}>Username</Text>
+            <TextInput
+              value={username}
+              onChangeText={setUsername}
+              accessibilityLabel="Username"
+              placeholder="e.g. manager"
+              placeholderTextColor={colors.textLight}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.input}
+              returnKeyType="next"
+              testID="login-username"
+            />
+          </View>
 
-      <View style={styles.divider}>
-        <Text style={styles.dividerText}>or</Text>
-      </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Password</Text>
+            <View style={styles.passwordWrap}>
+              <TextInput
+                value={password}
+                onChangeText={setPassword}
+                accessibilityLabel="Password"
+                accessibilityHint="Enter your account password"
+                placeholder="••••••••"
+                placeholderTextColor={colors.textLight}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                style={[styles.input, styles.passwordInput]}
+                returnKeyType="go"
+                onSubmitEditing={submit}
+                testID="login-password"
+              />
+              <Pressable
+                onPress={() => setShowPassword((s) => !s)}
+                hitSlop={10}
+                style={styles.eye}
+                accessibilityRole="button"
+                accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                accessibilityState={{ expanded: showPassword }}
+                {...ripple(colors.primary)}
+              >
+                <Text style={styles.eyeText}>{showPassword ? 'HIDE' : 'SHOW'}</Text>
+              </Pressable>
+            </View>
+          </View>
 
-      <TouchableOpacity style={styles.googleBtn} onPress={handleLogin}>
-        <Text style={styles.googleBtnText}>Sign in with credentials</Text>
-      </TouchableOpacity>
+          <Button
+            label={signingIn ? 'Signing in…' : 'Sign in'}
+            onPress={submit}
+            loading={signingIn}
+            style={styles.cta}
+          />
+
+          {__DEV__ ? (
+            <>
+              <Text style={styles.demoLabel}>DEMO ACCOUNTS</Text>
+              <View style={styles.demoGrid}>
+                {DEMO_ACCOUNTS.map((a) => (
+                  <Pressable
+                    key={a.username}
+                    onPress={() => useDemo(a.username, a.password)}
+                    style={({ pressed }) => [styles.demoChip, pressed && styles.demoChipPressed]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Fill demo ${a.role} credentials`}
+                    accessibilityHint={a.label}
+                    {...ripple(colors.primary)}
+                  >
+                    <Text style={styles.demoRole}>{a.role}</Text>
+                    <Text style={styles.demoLabel2}>{a.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </>
+          ) : null}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  root: { flex: 1, backgroundColor: colors.bg },
+  hero: {
+    backgroundColor: colors.primaryDark,
+    paddingTop: spacing.xxl + spacing.lg,
+    paddingBottom: spacing.xxl + spacing.xl,
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  heroBlobOne: {
+    position: 'absolute',
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    backgroundColor: withAlpha(colors.primary, 0.45),
+    top: -90,
+    right: -60,
+  },
+  heroBlobTwo: {
+    position: 'absolute',
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: withAlpha(colors.teal, 0.3),
+    bottom: -70,
+    left: -40,
+  },
+  logo: {
+    width: 68,
+    height: 68,
+    borderRadius: 18,
+    marginBottom: spacing.md,
+    borderWidth: 2,
+    borderColor: withAlpha('#ffffff', 0.25),
+  },
+  brand: { color: '#ffffff', fontSize: 22, fontWeight: '800', letterSpacing: -0.3 },
+  brandSub: { color: withAlpha('#ffffff', 0.75), fontSize: 13, marginTop: 2 },
+  sheet: {
     flex: 1,
-    backgroundColor: '#f8fafc',
-    padding: 32,
-    justifyContent: 'center',
+    backgroundColor: colors.bg,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    marginTop: -spacing.xl,
   },
-  header: {
-    marginBottom: 48,
-    textAlign: 'center',
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: '#0f172a',
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#64748b',
-  },
-  inputContainer: {
-    marginBottom: 24,
-  },
+  sheetContent: { padding: spacing.xl, paddingBottom: spacing.xxl },
+  sheetHint: { ...typography.bodyMuted, marginTop: 2, marginBottom: spacing.lg },
+  field: { marginBottom: spacing.lg },
+  label: { ...typography.caption, fontWeight: '700', marginBottom: 6, color: colors.muted },
   input: {
     height: 50,
-    borderColor: '#e2e8f0',
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    fontSize: 16,
-    color: '#0f172a',
-    marginBottom: 12,
-    backgroundColor: '#fff',
+    borderColor: colors.border,
+    paddingHorizontal: spacing.lg,
+    fontSize: 15,
+    color: colors.text,
   },
-  btn: {
-    height: 50,
-    borderRadius: 10,
-    backgroundColor: '#1d4ed8',
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 2,
-  },
-  btnText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  error: {
-    marginVertical: 16,
-    padding: 12,
-    backgroundColor: '#fee2e2',
-    borderRadius: 8,
-  },
-  errorText: {
-    color: '#dc2626',
-    fontSize: 14,
-  },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 24,
-  },
-  dividerText: {
-    color: '#64748b',
-    paddingHorizontal: 8,
-    fontSize: 12,
-  },
-  googleBtn: {
-    height: 50,
-    borderColor: '#e2e8f0',
+  passwordWrap: { justifyContent: 'center' },
+  passwordInput: { paddingRight: 62 },
+  eye: { position: 'absolute', right: spacing.lg },
+  eyeText: { color: colors.primary, fontSize: 11, fontWeight: '800', letterSpacing: 0.6 },
+  cta: { marginTop: spacing.sm },
+  demoLabel: { ...typography.overline, marginTop: spacing.xl, marginBottom: spacing.md },
+  demoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
+  demoChip: {
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderRadius: 10,
-    backgroundColor: '#fff',
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 2,
+    borderColor: colors.border,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    minWidth: '46%',
+    flexGrow: 1,
   },
-  googleBtnText: {
-    color: '#1d4ed8',
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  demoChipPressed: { backgroundColor: colors.primarySoft, borderColor: colors.primary },
+  demoRole: { color: colors.primary, fontWeight: '800', fontSize: 13 },
+  demoLabel2: { ...typography.caption, marginTop: 1 },
 });
