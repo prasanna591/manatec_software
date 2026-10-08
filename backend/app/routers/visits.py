@@ -27,6 +27,7 @@ from ..db import get_db
 from ..models import Department, Employee, Task, User, Visit, VisitNote
 from ..security import get_current_user, requires, requires_any
 from ..services import audit, notify
+from ..workflows import transition_objects, transition_statuses
 
 router = APIRouter(prefix="/visits", tags=["visits"])
 
@@ -140,7 +141,20 @@ def _serialize(
         "attachments": v.attachments or [],
         "status": v.status,
         "status_label": STATUS_LABEL.get(v.status, v.status),
-        "next_states": [s for s in VISIT_FLOW.get(v.status, ()) if s != "completed"],
+        "valid_transitions": transition_objects(
+            VISIT_FLOW.get(v.status, ()),
+            permission="Visits:edit",
+            labels=STATUS_LABEL,
+            exclude=("completed",),  # closing records the outcome via /close
+        ),
+        "next_states": transition_statuses(
+            transition_objects(
+                VISIT_FLOW.get(v.status, ()),
+                permission="Visits:edit",
+                labels=STATUS_LABEL,
+                exclude=("completed",),
+            )
+        ),
         "can_close": v.status in CLOSEABLE_FROM,
         "tracking_enabled": v.tracking_enabled,
         "location": location,

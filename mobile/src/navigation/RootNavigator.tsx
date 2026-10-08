@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { NavigationContainer, type LinkingOptions } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { useAuth } from '../auth/AuthContext';
-import { SECURITY_ROLES } from '../auth/permissions';
 import { getUnread, subscribeUnread } from '../unread';
 import { ripple } from '../motion';
 import { colors, radius, spacing, typography } from '../theme';
@@ -83,14 +83,13 @@ const SERVICES: {
   name: ServiceRoute;
   icon: IoniconName;
   perm?: string;
-  roles?: readonly string[];
 }[] = [
   { name: 'Attendance', icon: 'finger-print-outline' },
   { name: 'Leave', icon: 'calendar-outline' },
   { name: 'Visits', icon: 'walk-outline', perm: 'Visits' },
   // ServicesScreen lists this under "Gate & security" itself; the entry here only
   // mounts the screen and keeps it out of reach for other roles.
-  { name: 'Guests', icon: 'people-outline', roles: SECURITY_ROLES },
+  { name: 'Guests', icon: 'people-outline', perm: 'Guests' },
   { name: 'Notices', icon: 'megaphone-outline', perm: 'Notifications' },
   { name: 'Catalog', icon: 'pricetags-outline', perm: 'Catalog' },
   { name: 'Stock', icon: 'cube-outline', perm: 'Inventory' },
@@ -106,11 +105,11 @@ const LOGO = require('../../assets/icon.png');
 
 function Splash() {
   return (
-    <View style={styles.splash}>
+    <SafeAreaView style={styles.splash} edges={['top', 'bottom']}>
       <Image source={LOGO} style={styles.splashLogo} />
       <Text style={styles.splashText}>Manatec Digital</Text>
       <ActivityIndicator color="#ffffff" style={styles.splashSpinner} />
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -125,7 +124,7 @@ function OfflineGate({
   onSignOut: () => void;
 }) {
   return (
-    <View style={styles.gate}>
+    <SafeAreaView style={styles.gate} edges={['top', 'bottom']}>
       <Image source={LOGO} style={styles.gateLogo} />
       <Text style={styles.gateTitle}>Can't reach the server</Text>
       <View style={styles.gateBanner}>
@@ -149,20 +148,19 @@ function OfflineGate({
       >
         <Text style={styles.gateLinkText}>Sign in with a different account</Text>
       </Pressable>
-    </View>
+    </SafeAreaView>
   );
 }
 
 function ServicesStack() {
-  const { can, isInRole } = useAuth();
+  const { can } = useAuth();
   const visible = useMemo(
     () =>
       SERVICES.filter((s) => {
-        if (s.roles && !isInRole(s.roles)) return false;
         if (s.perm && !can(s.perm, 'view')) return false;
         return true;
       }),
-    [can, isInRole],
+    [can],
   );
 
   return (
@@ -253,6 +251,42 @@ function MainTabs() {
   );
 }
 
+/**
+ * Deep link paths. `Work` is a nested stack, so its children are listed under
+ * the same key. `Login` is not reachable this way: the login screen renders
+ * outside `NavigationContainer`, so a `manatec://login` link simply lands on
+ * whatever the current session already shows.
+ */
+const linking: LinkingOptions<any> = {
+  prefixes: ['manatec://', 'https://manatec.app'],
+  config: {
+    screens: {
+      Home: 'home',
+      Tasks: 'tasks',
+      Work: {
+        screens: {
+          WorkIndex: 'work',
+          Attendance: 'work/attendance',
+          Leave: 'work/leave',
+          Visits: 'work/visits',
+          Guests: 'work/guests',
+          Notices: 'work/notices',
+          Catalog: 'work/catalog',
+          Stock: 'work/inventory',
+          Procurement: 'work/procurement',
+          Production: 'work/production',
+          Quality: 'work/quality',
+          Machines: 'work/machines',
+          MaterialReq: 'work/material-requests',
+          Quotes: 'work/quotes',
+        },
+      },
+      Notifications: 'notifications',
+      Profile: 'profile',
+    },
+  },
+};
+
 export default function RootNavigator() {
   const { user, initializing, authError, reconnect, signOut } = useAuth();
 
@@ -260,29 +294,40 @@ export default function RootNavigator() {
 
   // Offline takes priority: a stored token survives a network blip, so the user
   // must get a retry instead of being bounced to the login screen.
+  // NOTE: no NavigationContainer here — there is no navigator to host yet,
+  // and an empty container only adds a blank layer over the gate.
   if (authError) {
     return (
-      <NavigationContainer>
-        <OfflineGate
-          error={authError}
-          onRetry={() => void reconnect()}
-          onSignOut={() => void signOut()}
-        />
-      </NavigationContainer>
+      <OfflineGate
+        error={authError}
+        onRetry={() => void reconnect()}
+        onSignOut={() => void signOut()}
+      />
     );
   }
 
-  if (!user) return <LoginScreen />;
+  // LoginScreen is a plain view (no navigation used inside), but it must sit
+  // inside the SafeAreaProvider so the hero / inputs are never hidden behind
+  // the notch or status bar — previously it rendered edge-to-edge and looked
+  // "invisible" on notched devices.
+  if (!user) {
+    return (
+      <SafeAreaView style={styles.authShell} edges={['top', 'bottom']}>
+        <LoginScreen />
+      </SafeAreaView>
+    );
+  }
 
+  // `linking` owns URL handling; a second raw `Linking` listener would duplicate
+  // every navigation and leak because `onReady` never gets a cleanup.
   return (
-    <NavigationContainer>
+    <NavigationContainer linking={linking}>
       <MainTabs />
     </NavigationContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
   splash: {
     flex: 1,
     alignItems: 'center',
@@ -312,5 +357,6 @@ const styles = StyleSheet.create({
   gateBtnText: { color: '#ffffff', fontWeight: '800', letterSpacing: 1 },
   gateLink: { marginTop: spacing.lg },
   gateLinkText: { ...typography.caption, color: colors.primary, fontWeight: '700' },
+  authShell: { flex: 1, backgroundColor: colors.bg },
   backBtn: { paddingRight: spacing.sm },
 });

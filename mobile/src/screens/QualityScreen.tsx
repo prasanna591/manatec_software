@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { api } from '../api/client';
 import type {
@@ -13,6 +13,7 @@ import type {
   QualitySummary,
 } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
+import { canGrant } from '../auth/permissions';
 import { messageOf } from '../auth/session';
 import {
   AccessDenied,
@@ -51,17 +52,9 @@ const KINDS: { key: InspectionKind; label: string }[] = [
   { key: 'final', label: 'Final' },
 ];
 
-const NCR_NEXT_LABEL: Record<NcrStatus, string> = {
-  open: 'Start investigation',
-  investigating: 'Propose corrective action',
-  corrective: 'Send for verification',
-  verification: 'Close with verification',
-  closed: 'Closed',
-  rejected: 'Reject',
-};
 
 export default function QualityScreen() {
-  const { can } = useAuth();
+  const { user, can } = useAuth();
   const mayView = can('Quality', 'view');
   const mayCreate = can('Quality', 'create');
 
@@ -433,6 +426,7 @@ function NcrCard({
   onDone: () => Promise<void>;
   onError: (message: string) => void;
 }) {
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [rootCause, setRootCause] = useState('');
   const [corrective, setCorrective] = useState('');
@@ -506,13 +500,13 @@ function NcrCard({
           <KeyValue label="Preventive" value={ncr.preventive_action || 'Not recorded'} />
           <KeyValue label="Verification" value={ncr.verification || 'Not recorded'} />
 
-          {ncr.next_states.length > 0 ? (
+          {ncr.valid_transitions.length > 0 ? (
             <>
               <SectionHeader label="To move this forward" />
               {ncr.status === 'investigating' || ncr.status === 'open' ? (
                 <TextField
                   label="Root cause"
-                  required={ncr.next_states.includes('investigating')}
+                  required={ncr.valid_transitions.some((t) => t.target_status === 'investigating')}
                   value={rootCause}
                   onChangeText={setRootCause}
                   placeholder="What actually went wrong"
@@ -540,16 +534,18 @@ function NcrCard({
                 />
               ) : null}
               <View style={styles.actions}>
-                {ncr.next_states.map((to) => (
-                  <Button
-                    key={to}
-                    label={NCR_NEXT_LABEL[to] ?? to}
-                    compact
-                    variant={to === 'rejected' ? 'danger' : 'primary'}
-                    loading={busy}
-                    onPress={() => void advance(to)}
-                  />
-                ))}
+                {ncr.valid_transitions
+                  .filter((t) => canGrant(user, t.required_permission))
+                  .map((t) => (
+                    <Button
+                      key={t.target_status}
+                      label={t.label}
+                      compact
+                      variant={t.action === 'reject' ? 'danger' : 'primary'}
+                      loading={busy}
+                      onPress={() => void advance(t.target_status as NcrStatus)}
+                    />
+                  ))}
               </View>
             </>
           ) : (

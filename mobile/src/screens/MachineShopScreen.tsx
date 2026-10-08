@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { api } from '../api/client';
 import type { DowntimeAnalytics, Machine, MachineStatus, MachineSummary } from '../api/types';

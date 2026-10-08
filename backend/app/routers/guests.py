@@ -1,7 +1,8 @@
 """Guest visits — register a visitor, security clears the visit, checkout on exit.
 
-Registering is open to every employee. Admitting (security ok) is limited to
-Logistics / security-type roles plus HR & management so the gate queue works.
+Registering only needs ``Guests:create`` (every role seed gets it). Admitting
+and checking out require ``Guests:approve`` (security + management, per the
+seed matrix) — never a role-name check.
 """
 from __future__ import annotations
 
@@ -13,13 +14,23 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import Employee, GuestVisit, User
-from ..security import get_current_user
+from ..models import Employee, GuestVisit, Permission, User
+from ..security import get_current_user, requires
 from ..services import audit
 
 router = APIRouter(prefix="/guests", tags=["guests"])
 
-SECURITY_ROLES = {"ADMIN", "MGMT", "DH", "HR", "LOG"}
+
+def _can_approve(db: Session, user: User) -> bool:
+    if user.role.code == "ADMIN":
+        return True
+    return db.scalar(
+        select(Permission.id).where(
+            Permission.role_id == user.role_id,
+            Permission.module == "Guests",
+            Permission.action == "approve",
+        )
+    ) is not None
 
 
 def _employee(db: Session, user: User) -> Employee | None:
@@ -52,8 +63,8 @@ def _serialize(g: GuestVisit) -> dict:
     }
 
 
-def _is_security(user: User) -> bool:
-    return user.role.code in SECURITY_ROLES
+def _is_security(db: Session, user: User) -> bool:
+    return _can_approve(db, user)
 
 
 class RegisterIn(BaseModel):
@@ -69,13 +80,13 @@ class RegisterIn(BaseModel):
 def list_guests(
     status_filter: str | None = None,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(requires("Guests", "view")),
 ):
     emp = _employee(db, user)
     q = select(GuestVisit)
     if status_filter:
         q = q.where(GuestVisit.status == status_filter)
-    if not _is_security(user):
+    if not _is_security(db, user):
         q = q.where(or_(
             GuestVisit.created_by == user.id,
             GuestVisit.host_name == (emp.name if emp else ""),
@@ -89,7 +100,7 @@ def register_visit(
     body: RegisterIn,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(requires("Guests", "create")),
 ):
     g = GuestVisit(
         visit_no=_visitor_no(db),
@@ -116,10 +127,8 @@ def admit_visit(
     visit_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(requires("Guests", "approve")),
 ):
-    if not _is_security(user):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only security / logistics may admit visitors")
     g = db.get(GuestVisit, visit_id)
     if not g:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Visit not found")
@@ -139,7 +148,7 @@ def checkout_visit(
     visit_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(requires("Guests", "approve")),
 ):
     g = db.get(GuestVisit, visit_id)
     if not g:
@@ -164,7 +173,7 @@ def cancel_visit(
     g = db.get(GuestVisit, visit_id)
     if not g:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Visit not found")
-    if g.created_by != user.id and not _is_security(user):
+    if g.created_by != user.id and not _is_security(db, user):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your visit")
     if g.status not in ("pending",):
         raise HTTPException(status.HTTP_409_CONFLICT, "Only pending visits can be cancelled")

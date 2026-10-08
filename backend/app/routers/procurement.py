@@ -1,4 +1,4 @@
-"""Procurement endpoints — buy-list, purchase orders, goods receipt, cancel (ported)."""
+"""Procurement endpoints — buy-list, purchase requisitions, purchase orders, goods receipt, cancel (ported)."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from .. import atp_service, procurement_service
 from ..db import get_db
-from ..models import Product, PurchaseOrder, User
+from ..models import Product, PurchaseOrder, PurchaseRequisition, User
 from ..security import requires
 
 router = APIRouter(prefix="/procurement", tags=["procurement"])
@@ -131,3 +131,109 @@ def cancel_po(po_id: int, db: Session = Depends(get_db),
     audit(db, user=actor, action="po.cancel", entity="purchase_order", entity_id=po.id)
     db.commit()
     return {"ok": True, "status": po.status}
+
+
+# --- Purchase Requisitions (from Material Request shortages) ---
+
+def _pr_404(db: Session, pr_id: int) -> PurchaseRequisition:
+    pr = db.get(PurchaseRequisition, pr_id)
+    if not pr:
+        raise HTTPException(404, "Purchase requisition not found")
+    return pr
+
+
+def _pr_out(pr: PurchaseRequisition) -> dict:
+    return {
+        "id": pr.id,
+        "pr_no": pr.pr_no,
+        "source_req_no": pr.source_req_no,
+        "requester": pr.requester,
+        "department_id": pr.department_id,
+        "priority": pr.priority,
+        "required_date": pr.required_date.isoformat() if pr.required_date else None,
+        "status": pr.status,
+        "lines": pr.lines,
+        "created_by": pr.created_by,
+        "created_at": pr.created_at.isoformat() if pr.created_at else None,
+    }
+
+
+@router.get("/purchase-requisitions")
+def list_prs(status: str | None = None, db: Session = Depends(get_db),
+             _: User = Depends(requires("PurchaseReq", "view"))):
+    from sqlalchemy import select
+    q = select(PurchaseRequisition).order_by(PurchaseRequisition.created_at.desc())
+    if status:
+        q = q.where(PurchaseRequisition.status == status)
+    rows = db.scalars(q.limit(200)).all()
+    return {"items": [_pr_out(pr) for pr in rows]}
+
+
+@router.get("/purchase-requisitions/{pr_id}")
+def pr_detail(pr_id: int, db: Session = Depends(get_db),
+              _: User = Depends(requires("PurchaseReq", "view"))):
+    return _pr_out(_pr_404(db, pr_id))
+
+
+class PrSubmitIn(BaseModel):
+    note: str = ""
+
+
+@router.post("/purchase-requisitions/{pr_id}/submit")
+def submit_pr(pr_id: int, body: PrSubmitIn, db: Session = Depends(get_db),
+              actor: User = Depends(requires("PurchaseReq", "create"))):
+    pr = _pr_404(db, pr_id)
+    if pr.status != "draft":
+        raise HTTPException(409, f"Cannot submit PR in {pr.status} status")
+    pr.status = "submitted"
+    from ..mfg_helpers import audit
+    audit(db, user=actor, action="pr.submit", entity="purchase_requisition", entity_id=pr.id,
+          after={"note": body.note})
+    db.commit()
+    return _pr_out(pr)
+
+
+class PrApproveIn(BaseModel):
+    note: str = ""
+
+
+@router.post("/purchase-requisitions/{pr_id}/approve")
+def approve_pr(pr_id: int, body: PrApproveIn, db: Session = Depends(get_db),
+               actor: User = Depends(requires("PurchaseReq", "approve"))):
+    pr = _pr_404(db, pr_id)
+    if pr.status != "submitted":
+        raise HTTPException(409, f"Cannot approve PR in {pr.status} status")
+    pr.status = "approved"
+    from ..mfg_helpers import audit
+    audit(db, user=actor, action="pr.approve", entity="purchase_requisition", entity_id=pr.id,
+          after={"note": body.note})
+    db.commit()
+    return _pr_out(pr)
+
+
+class PrCreatePoIn(BaseModel):
+    supplier_id: int
+    lines: list[PoLineIn]
+    note: str = ""
+
+
+@router.post("/purchase-requisitions/{pr_id}/create-po")
+def create_po_from_pr(pr_id: int, body: PrCreatePoIn, db: Session = Depends(get_db),
+                      actor: User = Depends(requires("Purchase", "create"))):
+    pr = _pr_404(db, pr_id)
+    if pr.status != "approved":
+        raise HTTPException(409, f"Cannot create PO from PR in {pr.status} status")
+    try:
+        po = procurement_service.create_po(
+            db, supplier_id=body.supplier_id, lines=[ln.model_dump() for ln in body.lines],
+            user_id=actor.id, note=body.note)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    db.commit()
+    # Link PO to PR
+    pr.status = "po_created"
+    from ..mfg_helpers import audit
+    audit(db, user=actor, action="pr.create_po", entity="purchase_requisition", entity_id=pr.id,
+          after={"po_id": po.id, "po_no": po.po_no})
+    db.commit()
+    return procurement_service.po_view(db, po)

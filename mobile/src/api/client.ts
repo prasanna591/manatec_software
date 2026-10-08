@@ -1,10 +1,13 @@
 import { API_BASE } from '../config';
 import type {
+  Activity,
   AttendanceRow,
   BuyList,
   CatalogProduct,
   CompanyNotice,
+  DashboardEmployees,
   DashboardOverview,
+  DepartmentStatus,
   DowntimeAnalytics,
   GuestVisit,
   Inspection,
@@ -25,9 +28,11 @@ import type {
   PoReceiveResult,
   ProductionOrder,
   PurchaseOrder,
+  PurchaseRequisition,
   QualitySummary,
   Quote,
   Roster,
+  SearchResponse,
   StockBalance,
   StockResponse,
   Task,
@@ -40,12 +45,51 @@ import type {
   VisitSummary,
 } from './types';
 
+/** Stable error codes from backend/app/errors.py (AGENT.md §6). */
+export type ApiErrorCode =
+  | 'VALIDATION'
+  | 'UNAUTH'
+  | 'DENIED'
+  | 'NOT_FOUND'
+  | 'CONFLICT'
+  | 'RATE_LIMITED'
+  | 'SERVER'
+  | 'UNAVAILABLE'
+  | 'NETWORK'
+  | 'TIMEOUT';
+
+const STATUS_CODE_MAP: Record<number, ApiErrorCode> = {
+  0: 'NETWORK',
+  400: 'VALIDATION',
+  401: 'UNAUTH',
+  403: 'DENIED',
+  404: 'NOT_FOUND',
+  409: 'CONFLICT',
+  422: 'VALIDATION',
+  429: 'RATE_LIMITED',
+  500: 'SERVER',
+  503: 'UNAVAILABLE',
+};
+
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  code: ApiErrorCode;
+  requiredPermission?: string;
+  current?: unknown;
+  retryable: boolean;
+
+  constructor(
+    status: number,
+    message: string,
+    options: { code?: string; requiredPermission?: string; current?: unknown; retryable?: boolean } = {},
+  ) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = (options.code as ApiErrorCode) ?? STATUS_CODE_MAP[status] ?? 'SERVER';
+    this.requiredPermission = options.requiredPermission;
+    this.current = options.current;
+    this.retryable = options.retryable ?? false;
   }
 }
 
@@ -58,9 +102,9 @@ async function fetchWithTimeout(path: string, init: RequestInit): Promise<Respon
     return await fetch(`${API_BASE}${path}`, { ...init, signal: controller.signal });
   } catch (e) {
     if (e instanceof Error && e.name === 'AbortError') {
-      throw new ApiError(0, `Server timed out at ${API_BASE}`);
+      throw new ApiError(0, `Server timed out at ${API_BASE}`, { code: 'TIMEOUT' });
     }
-    throw new ApiError(0, `Cannot reach the server at ${API_BASE}`);
+    throw new ApiError(0, `Cannot reach the server at ${API_BASE}`, { code: 'NETWORK' });
   } finally {
     clearTimeout(timer);
   }
@@ -161,15 +205,42 @@ async function refreshAccessToken(): Promise<boolean> {
   return refreshInFlight;
 }
 
-async function parseError(res: Response): Promise<string> {
+type ErrorEnvelope = {
+  detail?: string | Array<{ msg?: string }>;
+  error?: {
+    code?: string;
+    message?: string;
+    required_permission?: string;
+    current?: unknown;
+    retryable?: boolean;
+  };
+};
+
+/**
+ * Read the standard API error envelope (AGENT.md §6) with graceful fallback
+ * to the legacy `{detail}` string shape used by older endpoints.
+ */
+async function parseError(res: Response): Promise<ApiError> {
+  let body: ErrorEnvelope | undefined;
   try {
-    const body = await res.json();
-    if (typeof body?.detail === 'string') return body.detail;
-    if (Array.isArray(body?.detail)) return body.detail[0]?.msg ?? res.statusText;
+    body = (await res.json()) as ErrorEnvelope;
   } catch {
-    // non-JSON error body
+    body = undefined;
   }
-  return res.statusText || `HTTP ${res.status}`;
+  const message =
+    typeof body?.error?.message === 'string' && body.error.message
+      ? body.error.message
+      : typeof body?.detail === 'string'
+        ? body.detail
+        : Array.isArray(body?.detail) && body.detail[0]?.msg
+          ? body.detail[0].msg
+          : res.statusText || `HTTP ${res.status}`;
+  return new ApiError(res.status, message, {
+    code: body?.error?.code,
+    requiredPermission: body?.error?.required_permission,
+    current: body?.error?.current,
+    retryable: body?.error?.retryable,
+  });
 }
 
 /** Refresh this far ahead of the real expiry so a request never races the clock. */
@@ -197,7 +268,7 @@ async function request<T>(path: string, init: RequestInit = {}, isRetry = false)
 
   if (!res.ok) {
     if (res.status === 401 && onUnauthorized) onUnauthorized();
-    throw new ApiError(res.status, await parseError(res));
+    throw await parseError(res);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -211,7 +282,7 @@ export const api = {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
     });
-    if (!res.ok) throw new ApiError(res.status, await parseError(res));
+    if (!res.ok) throw await parseError(res);
     return (await res.json()) as LoginResponse;
   },
 
@@ -230,6 +301,9 @@ export const api = {
   me: () => request<UserProfile>('/auth/me'),
 
   dashboardOverview: () => request<DashboardOverview>('/dashboard/overview'),
+  dashboardDepartments: () => request<DepartmentStatus[]>('/dashboard/departments'),
+  dashboardActivities: () => request<Activity[]>('/dashboard/activities'),
+  dashboardEmployees: () => request<DashboardEmployees>('/dashboard/employees'),
 
   myTasks: () => request<Task[]>('/tasks/my'),
 
@@ -324,6 +398,31 @@ export const api = {
   cancelPurchaseOrder: (id: number) =>
     request<{ ok: boolean; status: string }>(`/procurement/purchase-orders/${id}/cancel`, { method: 'POST' }),
 
+  // Purchase Requisitions
+  purchaseRequisitions: (status?: string) => {
+    const qs = new URLSearchParams();
+    if (status) qs.set('status', status);
+    const s = qs.toString();
+    return request<{ items: PurchaseRequisition[] }>(`/procurement/purchase-requisitions${s ? `?${s}` : ''}`);
+  },
+  purchaseRequisition: (id: number) =>
+    request<PurchaseRequisition>(`/procurement/purchase-requisitions/${id}`),
+  submitPurchaseRequisition: (id: number, note = '') =>
+    request<PurchaseRequisition>(`/procurement/purchase-requisitions/${id}/submit`, {
+      method: 'POST',
+      body: JSON.stringify({ note }),
+    }),
+  approvePurchaseRequisition: (id: number, note = '') =>
+    request<PurchaseRequisition>(`/procurement/purchase-requisitions/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ note }),
+    }),
+  createPoFromPr: (id: number, body: any) =>
+    request<PurchaseOrder>(`/procurement/purchase-requisitions/${id}/create-po`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   productionOrders: () => request<{ items: ProductionOrder[] }>('/production/orders'),
   createProductionOrder: (body: { product_id: number; qty: number; due_date?: string }) =>
     request<ProductionOrder>('/production/orders', { method: 'POST', body: JSON.stringify(body) }),
@@ -370,7 +469,7 @@ export const api = {
   createVisit: (body: VisitCreateBody) =>
     request<Visit>('/visits', { method: 'POST', body: JSON.stringify(body) }),
 
-  /** `to` must be one of the visit's `next_states`; the API rejects anything else. */
+  /** `to` must be one of the visit's `valid_transitions`; the API rejects anything else. */
   moveVisit: (id: number, to: VisitStatus, note = '') =>
     request<Visit>(`/visits/${id}/status`, { method: 'POST', body: JSON.stringify({ status: to, note }) }),
 
@@ -483,4 +582,9 @@ export const api = {
 
   /** Free-text item search. Requires `Inventory:view`, so this is stores-side only. */
   stockSearch: (q: string) => request<StockBalance[]>(`/stores/stock?q=${encodeURIComponent(q)}`),
+
+  search: (query: string) => {
+    const q = new URLSearchParams({ q: query });
+    return request<SearchResponse>(`/search?${q.toString()}`);
+  },
 };

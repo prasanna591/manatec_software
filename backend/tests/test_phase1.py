@@ -43,6 +43,39 @@ def test_rbac_denies_operator_from_admin_module():
             headers={"Authorization": f"Bearer {token}"},
         )
         assert r.status_code == 403, r.text
+        body = r.json()
+        assert body["success"] is False
+        assert body["error"]["code"] == "DENIED"
+        assert body["error"]["retryable"] is False
+        assert body["meta"]["version"] == "v1"
+
+
+def test_error_envelope_denied_carries_required_permission_and_request_id():
+    with TestClient(app) as client:
+        token = _login(client, "operator", "demo123")["access_token"]
+        r = client.post(
+            "/api/v1/admin/departments",
+            json={"code": "X1", "name": "Nope"},
+            headers={"Authorization": f"Bearer {token}", "X-Request-ID": "req-abc123"},
+        )
+        assert r.status_code == 403
+        body = r.json()
+        assert body["error"]["required_permission"] == "Employees:create"
+        assert body["meta"]["request_id"] == "req-abc123"
+        assert r.headers.get("X-Request-ID") == "req-abc123"
+
+
+def test_unknown_route_wraps_404_in_envelope_and_unicodes_request_id():
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/v1/nope",
+            json={},
+            headers={"Authorization": f"Bearer {_login(client, 'admin', 'admin123')['access_token']}"},
+        )
+        assert r.status_code == 404
+        body = r.json()
+        assert body["error"]["code"] == "NOT_FOUND"
+        assert r.headers.get("X-Request-ID")
 
 
 def test_admin_create_department_is_audited():
@@ -180,3 +213,72 @@ def test_notifications_unread_and_mark_read():
         assert client.get("/api/v1/notifications/unread-count", headers=h).json()["unread"] >= 1
         note = client.get("/api/v1/notifications/my", headers=h).json()[0]
         assert client.post(f"/api/v1/notifications/{note['id']}/read", headers=h).status_code == 200
+
+
+# ── Phase 1 · permission-first gating ────────────────────────────────────────
+
+
+def test_notice_posting_is_a_permission_not_a_role():
+    with TestClient(app) as client:
+        hr = _login(client, "hr", "demo123")["access_token"]
+        op = _login(client, "operator", "demo123")["access_token"]
+
+        ok = client.post(
+            "/api/v1/announcements",
+            json={"title": "Lunch time", "body": "12:30"},
+            headers={"Authorization": f"Bearer {hr}"},
+        )
+        assert ok.status_code == 201, ok.text
+
+        denied = client.post(
+            "/api/v1/announcements",
+            json={"title": "Nope", "body": "x"},
+            headers={"Authorization": f"Bearer {op}"},
+        )
+        assert denied.status_code == 403
+        body = denied.json()
+        assert body["error"]["code"] == "DENIED"
+        assert body["error"]["required_permission"] == "Notifications:create"
+
+
+def test_guest_gate_is_permission_based():
+    with TestClient(app) as client:
+        op = _login(client, "operator", "demo123")["access_token"]
+        lg = _login(client, "logistics", "demo123")["access_token"]
+
+        reg = client.post(
+            "/api/v1/guests",
+            json={"visitor_name": "Walk In", "phone": "999", "purpose": "meeting"},
+            headers={"Authorization": f"Bearer {op}"},
+        )
+        assert reg.status_code == 200, reg.text
+        gid = reg.json()["id"]
+
+        denied = client.post(f"/api/v1/guests/{gid}/admit", headers={"Authorization": f"Bearer {op}"})
+        assert denied.status_code == 403
+        assert denied.json()["error"]["required_permission"] == "Guests:approve"
+
+        admitted = client.post(f"/api/v1/guests/{gid}/admit", headers={"Authorization": f"Bearer {lg}"})
+        assert admitted.status_code == 200, admitted.text
+        assert admitted.json()["status"] == "admitted"
+
+
+def test_valid_transitions_are_objects_with_permission():
+    with TestClient(app) as client:
+        token = _login(client, "admin", "admin123")["access_token"]
+        h = {"Authorization": f"Bearer {token}"}
+
+        orders = client.get("/api/v1/production/orders", headers=h).json().get("items") or []
+        if orders:
+            transitions = orders[0]["valid_transitions"]
+            assert isinstance(transitions, list) and transitions
+            first = transitions[0]
+            assert {"action", "label", "target_status", "required_permission"} <= set(first)
+            assert first["required_permission"] == "Production:edit"
+
+        ncrs = client.get("/api/v1/quality/ncrs", headers=h).json()
+        if ncrs:
+            t = next((x for x in ncrs if x["valid_transitions"]), None)
+            if t:
+                first = t["valid_transitions"][0]
+                assert set(first) == {"action", "label", "target_status", "required_permission"}

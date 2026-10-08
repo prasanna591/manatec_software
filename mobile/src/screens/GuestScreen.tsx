@@ -1,12 +1,11 @@
 import { useCallback, useState } from 'react';
 import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { api } from '../api/client';
 import type { GuestVisit } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
-import { SECURITY_ROLES } from '../auth/permissions';
 import { messageOf } from '../auth/session';
 import {
   Badge,
@@ -37,8 +36,8 @@ const FILTERS: { key: string | undefined; label: string }[] = [
 ];
 
 export default function GuestScreen() {
-  const { user, isInRole } = useAuth();
-  const isSecurity = isInRole(SECURITY_ROLES);
+  const { user, can } = useAuth();
+  const isSecurity = can('Guests', 'approve');
 
   const [visits, setVisits] = useState<GuestVisit[]>([]);
   const [filter, setFilter] = useState<string | undefined>(undefined);

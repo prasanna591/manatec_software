@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from . import atp_service, bom_service
 from .mfg_helpers import audit, items_map, post_ledger
 from .models import Item, ProdOrderLine, Product, ProductionOrder, Quote, User
+from .workflows import transition_objects, transition_statuses
 
 
 # State machine definition
@@ -40,6 +41,28 @@ VALID_TRANSITIONS: dict[ProductionStatus, list[ProductionStatus]] = {
 
 def can_transition(current: str, nxt: str) -> bool:
     return nxt in VALID_TRANSITIONS.get(current, [])
+
+
+PRODUCTION_STATUS_LABEL = {
+    "draft": "Draft",
+    "planned": "Planned",
+    "released": "Released",
+    "in_production": "In production",
+    "qc": "In QC",
+    "packed": "Packed",
+    "dispatched": "Dispatched",
+    "cancelled": "Cancelled",
+    "on_hold": "On hold",
+}
+
+
+def get_valid_transitions(status: str) -> list[dict]:
+    """Allowed next moves as ``{action, label, target_status, required_permission}``."""
+    return transition_objects(
+        VALID_TRANSITIONS.get(status, ()),
+        permission="Production:edit",
+        labels=PRODUCTION_STATUS_LABEL,
+    )
 
 
 def gen_order_no(db: Session) -> str:
@@ -156,15 +179,11 @@ def order_view(db: Session, order: ProductionOrder) -> dict:
             }
             for l in lines
         ],
-        "valid_transitions": VALID_TRANSITIONS.get(order.status, []),
+        "valid_transitions": get_valid_transitions(order.status),
+        "next_states": transition_statuses(get_valid_transitions(order.status)),
     }
 
 
 def all_orders(db: Session) -> list[dict]:
     orders = db.query(ProductionOrder).order_by(ProductionOrder.created_at.desc()).all()
     return [order_view(db, o) for o in orders]
-
-
-def get_valid_transitions(status: str) -> list[str]:
-    """Return allowed next statuses for a given current status."""
-    return VALID_TRANSITIONS.get(status, [])

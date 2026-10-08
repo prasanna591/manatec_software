@@ -7,12 +7,11 @@ import {
   View,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { api } from '../api/client';
 import type { CompanyNotice } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
-import { NOTICE_POSTER_ROLES } from '../auth/permissions';
 import { messageOf } from '../auth/session';
 import {
   AccessDenied,
@@ -27,9 +26,9 @@ import {
 import { colors, formatDate, spacing, typography } from '../theme';
 
 export default function NoticesScreen() {
-  const { can, isInRole } = useAuth();
+  const { can } = useAuth();
   const canView = can('Notifications', 'view');
-  const canPost = canView && isInRole(NOTICE_POSTER_ROLES);
+  const canPost = can('Notifications', 'create');
 
   const [notices, setNotices] = useState<CompanyNotice[]>([]);
   const [loading, setLoading] = useState(true);

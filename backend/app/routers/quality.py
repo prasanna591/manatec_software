@@ -24,6 +24,7 @@ from ..db import get_db
 from ..models import Department, Employee, Inspection, Ncr, Task, User
 from ..security import requires
 from ..services import audit, notify
+from ..workflows import transition_objects, transition_statuses
 
 router = APIRouter(prefix="/quality", tags=["quality"])
 
@@ -33,8 +34,9 @@ SEVERITIES = ("minor", "major", "critical")
 NCR_FLOW: dict[str, tuple[str, ...]] = {
     "open": ("investigating", "rejected"),
     "investigating": ("corrective", "rejected"),
-    "corrective": ("verification",),
-    "verification": ("closed", "corrective"),  # verification can send it back
+    "corrective": ("verification", "rework"),  # after corrective action, can go to verification or rework
+    "rework": ("verification",),  # rework triggers re-inspection
+    "verification": ("closed", "corrective"),  # verification can send it back to corrective
     "closed": (),
     "rejected": (),
 }
@@ -43,6 +45,7 @@ NCR_LABEL = {
     "open": "Open",
     "investigating": "Root cause analysis",
     "corrective": "Corrective action",
+    "rework": "Rework / Re-inspect",
     "verification": "Awaiting verification",
     "closed": "Closed",
     "rejected": "Rejected",
@@ -141,7 +144,12 @@ def _ncr_out(db: Session, n: Ncr) -> dict:
         "severity": n.severity,
         "status": n.status,
         "status_label": NCR_LABEL.get(n.status, n.status),
-        "next_states": list(NCR_FLOW.get(n.status, ())),
+        "valid_transitions": transition_objects(
+            NCR_FLOW.get(n.status, ()), permission="Quality:edit", labels=NCR_LABEL
+        ),
+        "next_states": transition_statuses(
+            transition_objects(NCR_FLOW.get(n.status, ()), permission="Quality:edit", labels=NCR_LABEL)
+        ),
         "assigned_to": n.assigned_to,
         "assigned_name": assignee or "",
         "department_name": dept.name if dept else "",
@@ -460,7 +468,7 @@ def ncr_stage(
     db: Session = Depends(get_db),
     user: User = Depends(requires("Quality", "edit")),
 ):
-    """Advance the NCR one stage: root cause → corrective action → verification → closed."""
+    """Advance the NCR one stage: root cause → corrective action → rework → verification → closed."""
     ncr = db.get(Ncr, ncr_id)
     if not ncr:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "NCR not found")
@@ -481,6 +489,8 @@ def ncr_stage(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Record the root cause before continuing")
     if target == "corrective" and not (body.corrective_action.strip() or ncr.corrective_action):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Record the corrective action before continuing")
+    if target == "rework" and not (body.corrective_action.strip() or ncr.corrective_action):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Record the rework performed before continuing")
     if target == "closed" and not (body.verification.strip() or ncr.verification):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Record the verification result before closing")
 
@@ -491,6 +501,33 @@ def ncr_stage(
     if body.assigned_to:
         ncr.assigned_to = body.assigned_to
     ncr.status = target
+    if target == "closed":
+        ncr.closed_at = datetime.now(timezone.utc)
+
+    # When moving to rework, create a new inspection linked to this NCR
+    if target == "rework":
+        # Find the original inspection to copy reference info
+        orig_insp = db.scalar(select(Inspection).where(Inspection.ncr_id == ncr.id))
+        if orig_insp:
+            new_insp = Inspection(
+                insp_no=_insp_no(db, orig_insp.kind),
+                kind=orig_insp.kind,
+                ref_type=orig_insp.ref_type,
+                ref_no=orig_insp.ref_no,
+                product_name=orig_insp.product_name,
+                serial_no=orig_insp.serial_no,
+                qty=orig_insp.qty,
+                severity=orig_insp.severity,
+                checklist=[],
+                result="pending",
+                created_by=user.id,
+            )
+            db.add(new_insp)
+            db.flush()
+            ncr.reinspection_id = new_insp.id
+            audit(db, actor=user, action="create", entity_type="inspection", entity_ref=new_insp.insp_no,
+                  after={"ncr_id": ncr.id, "rework_of": orig_insp.insp_no})
+
     if target == "closed":
         ncr.closed_at = datetime.now(timezone.utc)
 

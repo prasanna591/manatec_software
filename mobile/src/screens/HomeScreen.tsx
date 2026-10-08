@@ -1,12 +1,12 @@
 import { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { api } from '../api/client';
 import type { DashboardKpis, Notification, Task } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
-import { messageOf } from '../auth/session';
+import { isSessionExpired, messageOf } from '../auth/session';
 import {
   Badge,
   Button,
@@ -31,10 +31,10 @@ function greeting(): string {
 
 const isOpen = (t: Task) => t.status === 'open' || t.status === 'in_progress';
 
-export default function HomeScreen() {
-  const { user, isInRole } = useAuth();
+function HomeScreen() {
+  const { user, can, signOut } = useAuth();
   const navigation = useNavigation<any>();
-  const isManager = isInRole(['ADMIN', 'MGMT', 'DH']);
+  const isManager = can('Dashboard', 'export');
 
   const [kpis, setKpis] = useState<DashboardKpis | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -44,8 +44,8 @@ export default function HomeScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setError(null);
     try {
-      setError(null);
       const [overview, myTasks, notifications] = await Promise.all([
         api.dashboardOverview(),
         api.myTasks(),
@@ -56,12 +56,16 @@ export default function HomeScreen() {
       setAlerts(notifications);
       setUnread(notifications.length);
     } catch (e) {
+      if (isSessionExpired(e)) {
+        void signOut();
+        return;
+      }
       setError(messageOf(e, 'Failed to load your dashboard'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [signOut]);
 
   useFocusEffect(
     useCallback(() => {
@@ -196,7 +200,7 @@ export default function HomeScreen() {
                   <View style={styles.dot} />
                   <Text style={styles.urgentText} numberOfLines={2}>
                     {n.title}
-                    {n.entity_ref ? ` (${n.entity_ref})` : ''}
+                    {n.entity_ref ? ` · ${n.entity_ref}` : ''}
                   </Text>
                 </View>
               </View>
@@ -250,7 +254,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   greeting: { ...typography.title, color: '#ffffff' },
-  subtle: { fontSize: 13, color: withAlpha('#ffffff', 0.75), marginTop: 2 },
+  subtle: { fontSize: 13, color: 'rgba(255,255,255,0.75)', marginTop: 2 },
   kpiRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
   kpi: {
     flex: 1,
@@ -261,7 +265,7 @@ const styles = StyleSheet.create({
   },
   kpiValue: { fontSize: 24, fontWeight: '800', color: '#ffffff' },
   kpiAlert: { color: withAlpha(colors.warn, 1) },
-  kpiLabel: { fontSize: 11, color: withAlpha('#ffffff', 0.75), marginTop: 2 },
+  kpiLabel: { fontSize: 11, color: 'rgba(255,255,255,0.75)', marginTop: 2 },
   card: { marginBottom: spacing.md },
   taskTop: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
   cardTitle: { ...typography.body, fontWeight: '700', fontSize: 15, flex: 1 },
@@ -284,3 +288,5 @@ const styles = StyleSheet.create({
   pulseValue: { ...typography.body, fontWeight: '700' },
   readOnlyNote: { ...typography.caption, color: colors.warn, marginTop: spacing.sm },
 });
+
+export default HomeScreen;

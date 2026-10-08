@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from .config import get_settings
 from .db import get_db
+from .errors import ApiError
 from .models import Permission, User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -77,9 +78,11 @@ def requires(module: str, action: str):
             )
         )
         if not allowed:
-            raise HTTPException(
+            raise ApiError(
                 status.HTTP_403_FORBIDDEN,
                 f"Role {user.role.code} lacks {action} on {module}",
+                code="DENIED",
+                required_permission=f"{module}:{action}",
             )
         return user
 
@@ -112,9 +115,11 @@ def requires_any(*pairs: tuple[str, str]):
             if allowed:
                 return user
         wanted = " or ".join(f"{action} on {module}" for module, action in pairs)
-        raise HTTPException(
+        raise ApiError(
             status.HTTP_403_FORBIDDEN,
             f"Role {user.role.code} lacks {wanted}",
+            code="DENIED",
+            required_permission=" or ".join(f"{module}:{action}" for module, action in pairs),
         )
 
     return _check

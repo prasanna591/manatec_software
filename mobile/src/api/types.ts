@@ -4,6 +4,18 @@ export interface EmployeeProfile {
   code: string;
 }
 
+/**
+ * A workflow move the server accepts from the current state (AGENT.md §4).
+ * Clients render buttons only from this list and gate them on
+ * `required_permission`.
+ */
+export interface WorkflowTransition {
+  action: string;
+  label: string;
+  target_status: string;
+  required_permission: string;
+}
+
 export interface UserProfile {
   id: number;
   username: string;
@@ -33,6 +45,14 @@ export interface DashboardKpis {
 
 export interface DashboardOverview {
   kpis: DashboardKpis;
+}
+
+/** Headcount rollup returned by `GET /dashboard/employees`. */
+export interface DashboardEmployees {
+  total: number;
+  by_department: { dept_code: string; dept_name: string; count: number }[];
+  by_role: { role_code: string; role_name: string; count: number }[];
+  trend: { month: string; headcount: number }[];
 }
 
 export type TaskStatus = 'open' | 'in_progress' | 'done' | 'cancelled';
@@ -244,6 +264,21 @@ export interface PurchaseOrder {
   lines: PoLine[];
 }
 
+/** Purchase Requisition created from material request shortages. */
+export interface PurchaseRequisition {
+  id: number;
+  pr_no: string;
+  source_req_no: string | null;
+  requester: string | null;
+  department_id: number | null;
+  priority: string;
+  required_date: string | null;
+  status: string;
+  lines: { item: string; qty: number; source?: string; source_line_ref?: string }[];
+  created_by: string | null;
+  created_at: string | null;
+}
+
 /** One line of a goods receipt against an issued PO. */
 export interface PoReceiptLine {
   line_id: number;
@@ -277,7 +312,7 @@ export interface ProductionOrder {
   lines: ProdOrderLine[];
   shortage_value?: number;
   fully_available?: boolean;
-  valid_transitions?: string[];
+  valid_transitions: WorkflowTransition[];
 }
 
 export interface QuoteAvailability {
@@ -383,8 +418,8 @@ export interface Visit {
   attachments: { name: string; url?: string }[];
   status: VisitStatus;
   status_label: string;
-  /** Transitions the API will accept right now — the UI renders exactly these. */
-  next_states: VisitStatus[];
+  /** The moves the API accepts right now — the UI renders exactly these. */
+  valid_transitions: WorkflowTransition[];
   /**
    * The visit is in a state that can be closed, so the outcome has to be
    * recorded. The API deliberately refuses a plain `completed` transition.
@@ -508,7 +543,7 @@ export interface Ncr {
   severity: 'minor' | 'major' | 'critical';
   status: NcrStatus;
   status_label: string;
-  next_states: NcrStatus[];
+  valid_transitions: WorkflowTransition[];
   assigned_to: number | null;
   assigned_name: string;
   department_name: string;
@@ -521,7 +556,8 @@ export interface Ncr {
   overdue: boolean;
   closed_at: string | null;
   created_at: string;
-  inspection?: Inspection | null;
+  reinspection_id: number | null;
+  reinspection?: Inspection | null;
 }
 
 export interface QualitySummary {
@@ -689,4 +725,188 @@ export interface MaterialRequestCreateBody {
   required_date?: string | null;
   department_id?: number | null;
   lines: { item: string; qty: number }[];
+}
+
+// ── Additional types for manufacturing spine ────────────────────────────────
+
+export interface DepartmentStatus {
+  code: string;
+  name: string;
+  open_tasks: number;
+  total_tasks: number;
+  status: 'attention' | 'normal';
+}
+
+export interface Activity {
+  at: string;
+  actor: string;
+  action: string;
+  entity_type: string;
+  entity_ref: string | null;
+}
+
+export interface SearchResult {
+  kind: string;
+  label: string;
+  ref: string;
+  page:
+    | 'dashboard'
+    | 'tasks'
+    | 'admin'
+    | 'catalog'
+    | 'inventory'
+    | 'bom'
+    | 'procurement'
+    | 'production'
+    | 'quotes';
+}
+
+export interface SearchResponse {
+  q: string;
+  results: SearchResult[];
+}
+
+export interface CatalogItem {
+  id: number;
+  code: string;
+  description: string;
+  uom: string;
+  category: string;
+  source_class: string;
+  lead_time_days_min: number;
+  lead_time_days_max: number;
+  min_qty: number;
+  max_qty: number;
+  default_supplier_id: number | null;
+  default_supplier_name: string | null;
+  is_assembly: boolean;
+  on_hand?: number;
+  in_transit?: number;
+  committed?: number;
+  available?: number;
+}
+
+export interface Supplier {
+  id: number;
+  name: string;
+  contact: string;
+  lead_time_days_default: number;
+  rating: number;
+  is_active: boolean;
+}
+
+export interface InventoryLedgerRow {
+  id: number;
+  item_id: number;
+  code: string;
+  description: string;
+  trans_type: string;
+  qty_delta: number;
+  note: string;
+  created_at: string;
+}
+
+export interface AtpCoverage {
+  item_id: number;
+  code: string;
+  description: string;
+  need_per_unit: number;
+  req_for_target: number;
+  on_hand: number;
+  in_transit: number;
+  committed: number;
+  avail: number;
+  short: number;
+  unit_cost: number;
+  lead_days_min: number;
+  lead_days_max: number;
+  buildable_this_item: number;
+  shared_with: string[];
+}
+
+export interface AtpResult {
+  product_id: number;
+  product_name: string;
+  has_bom: boolean;
+  buildable_now: number | null;
+  limiting_item: string | null;
+  limiting_item_id: number | null;
+  coverage: AtpCoverage[];
+  total_line_value: number;
+  whatif_qty: number | null;
+  shortage_value: number;
+  max_lead_days: number;
+  ok_for_target: boolean;
+}
+
+export interface BomProduct {
+  product_id: number;
+  product_name: string;
+  has_bom: boolean;
+  buildable_now: number | null;
+  limiting_item: string | null;
+  line_count: number;
+  shortage_value: number;
+}
+
+export interface BomRev {
+  id: number;
+  rev_no: number;
+  status: string;
+  created_at: string | null;
+  line_count: number;
+}
+
+export interface BomMeta {
+  product_id: number;
+  product_name: string;
+  revs: BomRev[];
+}
+
+export interface BomTreeNode {
+  item_id: number | null;
+  code: string;
+  description: string;
+  qty: number;
+  scrap_pct: number;
+  is_assembly: boolean;
+  children: BomTreeNode[];
+}
+
+export interface AnalyzerRow {
+  item: string;
+  in_bom: boolean;
+  need: number;
+  have: number;
+  capacity: number | null;
+  max_units: number;
+  stock_after: number;
+  shortage: number;
+  status: 'OK' | 'SHORT' | 'EXTRA';
+}
+
+export interface AnalyzerProduct {
+  name: string;
+  max_units: number;
+  status: 'OK' | 'BLOCKED';
+  bom_item_count: number;
+  missing_count: number;
+  shortage_count: number;
+  leftover_count: number;
+  leftover_total: number;
+  unused_count: number;
+  unused_total: number;
+  rows: AnalyzerRow[];
+  catalog_image: string;
+  catalog_category: string;
+  catalog_price: string;
+}
+
+export interface AnalyzerReport {
+  inventory_count: number;
+  master_item_count: number;
+  product_count: number;
+  buildable: number;
+  blocked: number;
+  products: AnalyzerProduct[];
 }

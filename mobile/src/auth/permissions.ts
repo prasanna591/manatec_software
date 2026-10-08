@@ -12,20 +12,6 @@ export const ACTIONS: Record<Action, string> = {
   delete: 'Delete',
 };
 
-/**
- * Role sets mirrored from the backend routers so the UI hides controls the
- * API would reject with 403 anyway.
- *   backend/app/routers/leave.py     APPROVER_ROLES / HR_ROLES
- *   backend/app/routers/attendance.py MGMT_ROLES
- *   backend/app/routers/guests.py     SECURITY_ROLES
- *   backend/app/routers/announcements.py POSTER_ROLES
- */
-export const APPROVER_ROLES = ['ADMIN', 'MGMT', 'DH'] as const;
-export const HR_ROLES = ['ADMIN', 'MGMT', 'DH', 'HR'] as const;
-export const ATTENDANCE_ROSTER_ROLES = ['ADMIN', 'MGMT', 'DH', 'HR'] as const;
-export const SECURITY_ROLES = ['ADMIN', 'MGMT', 'DH', 'HR', 'LOG'] as const;
-export const NOTICE_POSTER_ROLES = ['ADMIN', 'MGMT', 'HR'] as const;
-
 /** Every permission module the backend seeds. */
 export const MODULES = [
   'Home',
@@ -59,6 +45,8 @@ export const MODULES = [
   'Visits',
   // Deliberately narrower than `Visits` — see the note in backend/app/seed.py.
   'BuyerTracking',
+  // Gate register: everyone registers their own visitor; only security approves.
+  'Guests',
 ] as const;
 
 export type Module = (typeof MODULES)[number];
@@ -73,15 +61,18 @@ export function can(user: UserProfile | null, module: string, action: Action): b
   }) || user.permissions.includes(key);
 }
 
+/** Check a full `Module:action` grant string (e.g. from a workflow transition). */
+export function canGrant(user: UserProfile | null, grant: string): boolean {
+  const [module, action] = grant.split(':');
+  if (!module || !action) return false;
+  return can(user, module, action as Action);
+}
+
 export function hasModule(user: UserProfile | null, module: string): boolean {
   if (!user) return false;
   if (user.role === 'ADMIN') return true;
   const prefix = `${module}:`;
   return user.permissions.some((p) => p.startsWith(prefix));
-}
-
-export function isInRole(user: UserProfile | null, roles: readonly string[]): boolean {
-  return !!user && roles.includes(user.role);
 }
 
 /** True when the user holds at least one action on the module. */

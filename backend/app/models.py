@@ -223,7 +223,7 @@ class MaterialIssue(Base):
 
 class MaterialRequest(Base):
     """FRS 10.4 — consuming departments ask; Stores fulfils.
-    Lines [{item, qty, issued_qty}]; status open→partial/fulfilled, or cancelled."""
+    Lines [{item, qty, issued_qty}]; status open→partial/fulfilled/shortage, or cancelled."""
     __tablename__ = "material_requests"
     id: Mapped[int] = mapped_column(primary_key=True)
     req_no: Mapped[str] = mapped_column(String(32), unique=True, index=True)
@@ -233,6 +233,24 @@ class MaterialRequest(Base):
     priority: Mapped[str] = mapped_column(String(16), default="normal")
     required_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="open", index=True)
+    lines: Mapped[list] = mapped_column(JSON, default=list)
+    shortage_lines: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    purchase_requisition_id: Mapped[int | None] = mapped_column(ForeignKey("purchase_requisitions.id"), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class PurchaseRequisition(Base):
+    """Purchase requisition created from material request shortages."""
+    __tablename__ = "purchase_requisitions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    pr_no: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    source_req_no: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    requester: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"), nullable=True)
+    priority: Mapped[str] = mapped_column(String(16), default="normal")
+    required_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="draft", index=True)  # draft/submitted/approved/po_created
     lines: Mapped[list] = mapped_column(JSON, default=list)
     created_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -691,7 +709,7 @@ class Inspection(Base):
 
 
 class Ncr(Base):
-    """Non-conformance report: open → root cause → corrective action → verify → close."""
+    """Non-conformance report: open → root cause → corrective action → rework → verify → close."""
 
     __tablename__ = "ncrs"
 
@@ -704,7 +722,7 @@ class Ncr(Base):
     severity: Mapped[str] = mapped_column(String(16), default="minor", index=True)
     status: Mapped[str] = mapped_column(
         String(16), default="open", index=True
-    )  # open/investigating/corrective/verification/closed/rejected
+    )  # open/investigating/corrective/rework/verification/closed/rejected
     assigned_to: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"), nullable=True)
     qty_affected: Mapped[int] = mapped_column(Integer, default=0)
@@ -714,6 +732,7 @@ class Ncr(Base):
     verification: Mapped[str] = mapped_column(Text, default="")
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    reinspection_id: Mapped[int | None] = mapped_column(ForeignKey("inspections.id"), nullable=True)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

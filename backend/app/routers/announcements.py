@@ -1,11 +1,12 @@
 """Company announcements — a broadcast feed visible to every employee.
 
-Any authenticated user can read. Posting is restricted to HR / management /
-admin; each post also fans out an in-app notification so the unread badge works.
+Any authenticated user can read. Posting requires the `Notifications:create`
+grant (MGMT + HR per seed.py — note this predates role-gating the UI); each
+post also fans out an in-app notification so the unread badge works.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,8 +17,6 @@ from ..security import get_current_user, requires
 from ..services import audit, notify
 
 router = APIRouter(prefix="/announcements", tags=["announcements"])
-
-POSTER_ROLES = {"ADMIN", "MGMT", "HR"}
 
 
 @router.get("")
@@ -44,11 +43,8 @@ def post_notice(
     body: NoticeIn,
     request: Request,
     db: Session = Depends(get_db),
-    _: User = Depends(requires("Notifications", "view")),
-    user: User = Depends(get_current_user),
+    user: User = Depends(requires("Notifications", "create")),
 ):
-    if user.role.code not in POSTER_ROLES:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only HR / management may post announcements")
     n = CompanyNotice(title=body.title, body=body.body, posted_by=user.id)
     db.add(n)
     db.commit()

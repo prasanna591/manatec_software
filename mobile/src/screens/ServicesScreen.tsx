@@ -1,6 +1,6 @@
 import { ScrollView, StyleSheet, Text, Pressable, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { useAuth } from '../auth/AuthContext';
 import { Card, Monogram, SectionHeader } from '../components/ui';
@@ -15,7 +15,7 @@ interface ServiceItem {
 }
 
 export default function ServicesScreen() {
-  const { user, can, isInRole } = useAuth();
+  const { user, can } = useAuth();
   const navigation = useNavigation<any>();
 
     const everyone: ServiceItem[] = [
@@ -51,7 +51,7 @@ export default function ServicesScreen() {
     icon: 'megaphone-outline',
   });
 
-  const security: ServiceItem[] = isInRole(['ADMIN', 'MGMT', 'DH', 'HR', 'LOG'])
+  const security: ServiceItem[] = can('Guests', 'view')
     ? [
         {
           route: 'Guests',

@@ -1,10 +1,9 @@
 import { useCallback, useMemo, useState } from 'react';
 import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
 
-import { api } from '../api/client';
+import { useMyTasks, useSetTaskStatus } from '../api/hooks';
 import type { Task, TaskStatus } from '../api/types';
-import { messageOf } from '../auth/session';
+import { useRefreshOnFocus } from '../hooks';
 import {
   Badge,
   Button,
@@ -41,58 +40,55 @@ function dueMeta(due: string | null): { text: string; overdue: boolean } {
 }
 
 export default function TasksScreen() {
-  const [tasks, setTasks] = useState<Task[]>([]);
   const [filter, setFilter] = useState<Filter>('active');
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      setError(null);
-      setTasks(await api.myTasks());
-    } catch (e) {
-      setError(messageOf(e, 'Failed to load tasks'));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+  const {
+    data: tasks,
+    isLoading: loading,
+    isFetching: refreshing,
+    error: queryError,
+    refetch: refresh,
+  } = useMyTasks();
 
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
+  const setTaskStatus = useSetTaskStatus();
+
+  // Errors surface through the shared banner, so the rejection is absorbed here
+  // rather than escaping as an unhandled promise.
+  const changeStatus = useCallback(
+    async (task: Task, status: TaskStatus) => {
+      setBusyId(task.id);
+      try {
+        await setTaskStatus.mutateAsync({ id: task.id, status });
+      } catch {
+        // `error` from the query/mutation below renders the banner.
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [setTaskStatus],
   );
 
-  const changeStatus = useCallback(async (task: Task, status: TaskStatus) => {
-    setBusyId(task.id);
-    setError(null);
-    try {
-      const updated = await api.setTaskStatus(task.id, status);
-      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-    } catch (e) {
-      setError(messageOf(e, 'Could not update the task'));
-    } finally {
-      setBusyId(null);
-    }
-  }, []);
+  // React Query has no window focus on native, so tab switches never refetch.
+  useRefreshOnFocus(refresh);
 
   const counts = useMemo(
     () => ({
-      all: tasks.length,
-      active: tasks.filter((t) => t.status === 'open' || t.status === 'in_progress').length,
-      done: tasks.filter((t) => t.status === 'done').length,
+      all: tasks?.length ?? 0,
+      active: tasks?.filter((t) => t.status === 'open' || t.status === 'in_progress').length ?? 0,
+      done: tasks?.filter((t) => t.status === 'done').length ?? 0,
     }),
     [tasks],
   );
 
   const visible = useMemo(() => {
+    if (!tasks) return [];
     if (filter === 'active') return tasks.filter((t) => t.status === 'open' || t.status === 'in_progress');
     if (filter === 'done') return tasks.filter((t) => t.status === 'done');
     return tasks;
   }, [tasks, filter]);
+
+  const errorMessage = queryError?.message ?? setTaskStatus.error?.message ?? null;
 
   if (loading) return <ScreenSkeleton label="Loading your tasks" rows={5} />;
 
@@ -110,9 +106,9 @@ export default function TasksScreen() {
         ))}
       </View>
 
-      {error ? (
+      {errorMessage ? (
         <View style={styles.bannerWrap}>
-          <ErrorBanner message={error} onRetry={() => void load()} />
+          <ErrorBanner message={errorMessage} onRetry={() => void refresh()} />
         </View>
       ) : null}
 
@@ -124,10 +120,7 @@ export default function TasksScreen() {
           <RefreshControl
             refreshing={refreshing}
             tintColor={colors.primary}
-            onRefresh={() => {
-              setRefreshing(true);
-              void load();
-            }}
+            onRefresh={() => void refresh()}
           />
         }
         ListEmptyComponent={

@@ -70,7 +70,9 @@ _MATRIX: dict[str, list[str]] = {
     "Employees":    ["R",  "R",  "R",  "R",  "-",  "-",  "-",  "-",  "-",  "-",  "-",  "RCEA","R"],
     "Attendance":   ["RX", "RX", "RCE","-",  "RCE","RCE","RCE","RCE","RCE","RCE","RCE","RCEA","R"],
     "Approvals":    ["RA"] * 13,
-    "Notifications":["RX"] * 13,
+    # Posting a company announcement is a `create` grant (MGMT + HR), kept out
+    # of the shared Notifications:view the floor has. Do not role-gate this.
+    "Notifications":["RCX","RX", "RX", "RX", "RX", "RX", "RX", "RX", "RX", "RX", "RX", "RCX","RX"],
     "Reports":      ["RX"] * 13,
     "Admin":        ["-",  "-",  "-",  "-",  "-",  "-",  "-",  "-",  "-",  "-",  "-",  "CEAD","-"],
     "Analytics":    ["RX", "RX", "R",  "R",  "-",  "-",  "R",  "-",  "-",  "-",  "R",  "-",  "-"],
@@ -84,11 +86,15 @@ _MATRIX: dict[str, list[str]] = {
     # Location is deliberately narrower than the visit itself. Without this the
     # production floor could read a buyer's live position.
     "BuyerTracking":["R",   "R",   "R",   "-",   "-",   "-",  "R",  "R",  "-",  "-",   "R",   "R",   "-"],
+    # Guest/gate register: every employee may register + see their own (RC);
+    # security (MGMT/DH/HR/LOG) additionally admits, checks out and sees all
+    # (A + E). Keep the admit gate permission-based, never role-based.
+    "Guests":      ["RCEA","RCEA","RC",  "RC",  "RC",  "RC",  "RC", "RCEA","RC", "RC",  "RC",  "RCEA","RC"],
 }
 # role columns in the same order as _MATRIX rows
 _COLS = ["MGMT", "DH", "SUP", "PLNR", "OPER", "STORE", "PUR", "LOG", "QINSP", "ENG", "COMM", "HR", "ACC"]
 # STK and ROBOT are not in the FRS 5.2 table; give them the documented minimum.
-_EXTRA = {"STK": {"Inventory": "RCE", "MaterialReq": "-", "Attendance": "RCE"}, "ROBOT": {}}
+_EXTRA = {"STK": {"Inventory": "RCE", "MaterialReq": "-", "Attendance": "RCE", "Guests": "RC"}, "ROBOT": {}}
 
 # Demo accounts for the UI-first phase (dev only). (dept, role, username, name)
 DEMO_USERS = [
@@ -867,9 +873,10 @@ def seed_workshop(db: Session) -> None:
 def init_db() -> None:
     from . import models  # noqa: F401  (register models on Base.metadata)
     from .config import get_settings
-    from .db import Base
+    from .db import Base, _add_missing_columns
     from .erp import sync_all
 
+    _add_missing_columns()
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         seed(db)

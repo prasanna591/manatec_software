@@ -1,11 +1,12 @@
 import { useCallback, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { Animated, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { api } from '../api/client';
 import type { Visit, VisitCloseBody, VisitStatus, VisitSummary } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
+import { canGrant } from '../auth/permissions';
 import { messageOf } from '../auth/session';
 import {
   AccessDenied,
@@ -134,7 +135,7 @@ export default function VisitsScreen() {
     [load],
   );
 
-  // Expanding only reveals the actions the API already offered in `next_states`,
+  // Expanding only reveals the actions the API already offered in `valid_transitions`,
   // so it never needs a round trip.
   const toggle = useCallback((visit: Visit) => {
     setExpanded((current) => (current === visit.id ? null : visit.id));
@@ -289,6 +290,7 @@ function VisitCard({
   onToggleClose: () => void;
   onClose: (body: VisitCloseBody) => void;
 }) {
+  const { user } = useAuth();
   const closed = visit.status === 'completed' || visit.status === 'cancelled';
 
   return (
@@ -327,8 +329,8 @@ function VisitCard({
         {visit.transport_required ? (
           <Badge label={visit.vehicle_no ? `TRANSPORT · ${visit.vehicle_no}` : 'TRANSPORT'} color={colors.teal} />
         ) : null}
-        {visit.next_states.length > 0 ? (
-          <Badge label={`${visit.next_states.length} NEXT STEP${visit.next_states.length === 1 ? '' : 'S'}`} color={colors.primary} />
+        {visit.valid_transitions.length > 0 ? (
+          <Badge label={`${visit.valid_transitions.length} NEXT STEP${visit.valid_transitions.length === 1 ? '' : 'S'}`} color={colors.primary} />
         ) : null}
       </View>
 
@@ -369,18 +371,20 @@ function VisitCard({
             />
           ) : null}
 
-          {!closed && visit.next_states.length > 0 ? (
+          {!closed && visit.valid_transitions.length > 0 ? (
             <View style={styles.actions}>
-              {visit.next_states.map((to) => (
-                <Button
-                  key={to}
-                  label={to.replace(/_/g, ' ')}
-                  compact
-                  variant={to === 'cancelled' ? 'danger' : 'primary'}
-                  disabled={busy}
-                  onPress={() => onAdvance(to)}
-                />
-              ))}
+              {visit.valid_transitions
+                .filter((t) => canGrant(user, t.required_permission))
+                .map((t) => (
+                  <Button
+                    key={t.target_status}
+                    label={t.label}
+                    compact
+                    variant={t.action === 'cancel' ? 'danger' : 'primary'}
+                    disabled={busy}
+                    onPress={() => onAdvance(t.target_status as VisitStatus)}
+                  />
+                ))}
             </View>
           ) : null}
 
@@ -537,7 +541,7 @@ function PressableRow({
         />
         <Text style={styles.trackerToggle}>{label}</Text>
       </Row>
-      <View style={animatedStyle} />
+      <Animated.View style={animatedStyle} />
     </Pressable>
   );
 }

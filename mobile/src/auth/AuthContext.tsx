@@ -14,7 +14,6 @@ import {
   anyAction,
   can as canPerm,
   hasModule as hasModulePerm,
-  isInRole as isInRolePerm,
   type Action,
 } from './permissions';
 
@@ -37,7 +36,6 @@ interface AuthContextValue {
   reconnect: () => Promise<void>;
   can: (module: string, action: Action) => boolean;
   hasModule: (module: string) => boolean;
-  isInRole: (roles: readonly string[]) => boolean;
   canAny: (module: string) => boolean;
   /** Call when the API answers 401 so the shell falls back to the login screen. */
   invalidate: () => Promise<void>;
@@ -52,8 +50,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [initializing, setInitializing] = useState(true);
   const [signingIn, setSigningIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
-
-  const BOOTSTRAP_TIMEOUT_MS = 10000;
 
   const bootstrap = useCallback(async () => {
     setInitializing(true);
@@ -162,7 +158,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       invalidate,
       can: (module, action) => canPerm(user, module, action),
       hasModule: (module) => hasModulePerm(user, module),
-      isInRole: (roles) => isInRolePerm(user, roles),
       canAny: (module) => anyAction(user, module),
     }),
     [user, initializing, signingIn, authError, signIn, signOut, bootstrap, invalidate],

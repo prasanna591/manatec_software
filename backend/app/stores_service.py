@@ -18,6 +18,7 @@ from .models import (
     GoodsReceiptNote,
     MaterialIssue,
     MaterialRequest,
+    PurchaseRequisition,
     StockBalance,
     StockMovement,
     StockTake,
@@ -29,6 +30,7 @@ _REF = {
     "GRN": (GoodsReceiptNote, "grn_no"),
     "ISS": (MaterialIssue, "issue_no"),
     "MRQ": (MaterialRequest, "req_no"),
+    "PRQ": (PurchaseRequisition, "pr_no"),
     "TRN": (TransferOrder, "transfer_no"),
     "TAK": (StockTake, "take_no"),
 }
@@ -215,20 +217,73 @@ def fulfil_request(db: Session, req: MaterialRequest, *, warehouse: str, actor: 
     if req.status == "cancelled":
         raise ValueError("cancelled request cannot be fulfilled")
     lines = req.lines
+    shortage_lines = []
     for ln in lines:
         qty = int(ln["qty"]) - int(ln.get("issued_qty", 0))
         if qty <= 0:
             continue
-        _move(db, item=ln["item"], warehouse=warehouse, delta=-qty,
-              ref_type="issue", ref_no=f"{req.req_no}-FULFIL",
-              note="Material request fulfilment", actor=actor)
-        ln["issued_qty"] = int(ln.get("issued_qty", 0)) + qty
+        # Check available stock before issuing
+        bal = balance(db, ln["item"], warehouse)
+        available = (bal.on_hand - bal.reserved) if bal else 0
+        if available >= qty:
+            _move(db, item=ln["item"], warehouse=warehouse, delta=-qty,
+                  ref_type="issue", ref_no=f"{req.req_no}-FULFIL",
+                  note="Material request fulfilment", actor=actor)
+            ln["issued_qty"] = int(ln.get("issued_qty", 0)) + qty
+        else:
+            # Partial issue what's available
+            if available > 0:
+                _move(db, item=ln["item"], warehouse=warehouse, delta=-available,
+                      ref_type="issue", ref_no=f"{req.req_no}-FULFIL",
+                      note="Material request fulfilment (partial)", actor=actor)
+                ln["issued_qty"] = int(ln.get("issued_qty", 0)) + available
+                shortage_lines.append({"item": ln["item"], "requested": qty, "issued": available, "short": qty - available})
+            else:
+                shortage_lines.append({"item": ln["item"], "requested": qty, "issued": 0, "short": qty})
     req.lines = lines  # reassign so the JSON column persists
     flag_modified(req, "lines")
-    req.status = "fulfilled" if all(int(l.get("issued_qty", 0)) >= int(l["qty"]) for l in req.lines) else "partial"
+    if shortage_lines:
+        req.status = "shortage"
+        req.shortage_lines = shortage_lines
+        # Auto-create purchase requisition for shortage items
+        _create_purchase_requisition(db, req, shortage_lines, actor)
+    elif all(int(l.get("issued_qty", 0)) >= int(l["qty"]) for l in req.lines):
+        req.status = "fulfilled"
+    else:
+        req.status = "partial"
     db.commit()
     db.refresh(req)
     return req
+
+
+def _create_purchase_requisition(db: Session, req: MaterialRequest, shortage_lines: list[dict], actor: str) -> None:
+    """Create a purchase requisition linked to the material request for shortage items."""
+    from .models import PurchaseRequisition
+    # Group by item to aggregate shortages
+    item_shortages = {}
+    for ln in shortage_lines:
+        item = ln["item"]
+        if item not in item_shortages:
+            item_shortages[item] = 0
+        item_shortages[item] += ln["short"]
+    
+    pr = PurchaseRequisition(
+        pr_no=next_no(db, "PRQ"),
+        source_req_no=req.req_no,
+        requester=actor,
+        department_id=req.department_id,
+        priority=req.priority,
+        required_date=req.required_date,
+        lines=[{"item": item, "qty": qty, "source": "material_request", "source_line_ref": req.req_no} 
+               for item, qty in item_shortages.items()],
+        status="draft",
+        created_by=actor,
+    )
+    db.add(pr)
+    db.flush()
+    # Link back to material request
+    req.purchase_requisition_id = pr.id
+    db.commit()
 
 
 def cancel_request(db: Session, req: MaterialRequest) -> MaterialRequest:

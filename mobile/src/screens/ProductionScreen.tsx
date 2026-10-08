@@ -1,11 +1,16 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
-import { api } from '../api/client';
 import type { CatalogProduct, ProductionOrder } from '../api/types';
+import {
+  useCatalogProducts,
+  useCreateProductionOrder,
+  useProductionOrders,
+  useSetProductionStatus,
+} from '../api/hooks';
 import { useAuth } from '../auth/AuthContext';
+import { canGrant } from '../auth/permissions';
 import { messageOf } from '../auth/session';
 import {
   AccessDenied,
@@ -51,74 +56,57 @@ const STAGE_LABEL: Record<string, string> = {
 };
 
 export default function ProductionScreen() {
-  const { can } = useAuth();
+  const { user, can } = useAuth();
   const canView = can('Production', 'view');
   const canCreate = can('Production', 'create');
   const canEdit = can('Production', 'edit');
 
-  const [orders, setOrders] = useState<ProductionOrder[]>([]);
-  const [products, setProducts] = useState<CatalogProduct[]>([]);
+  // Fetching is gated on the same permission the backend enforces, otherwise a
+  // read-only role would hit 403s before the AccessDenied screen ever renders.
+  const {
+    data: ordersData,
+    isLoading: loading,
+    isFetching: refreshing,
+    error: fetchError,
+    refetch: refresh,
+  } = useProductionOrders({ enabled: canView });
+  const { data: productsData } = useCatalogProducts('', '', { enabled: canView && canCreate });
+
+  const orders = useMemo(() => ordersData?.items ?? [], [ordersData]);
+  const products = useMemo(() => productsData?.items ?? [], [productsData]);
+
   const [pick, setPick] = useState<CatalogProduct | null>(null);
   const [qty, setQty] = useState('10');
   const [showCreate, setShowCreate] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!canView) {
-      setLoading(false);
-      return;
-    }
-    try {
-      setError(null);
-      const [o, p] = await Promise.all([api.productionOrders(), api.catalogProducts('')]);
-      setOrders(o.items);
-      setProducts(p.items);
-    } catch (e) {
-      setError(messageOf(e, 'Failed to load production'));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [canView]);
-
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
-  );
-
-  const refreshList = async () => setOrders((await api.productionOrders()).items);
+  const createOrder = useCreateProductionOrder();
+  const busy = createOrder.isPending;
 
   const plan = useCallback(async () => {
     if (!pick) return;
-    setBusy(true);
-    setError(null);
+    setLocalError(null);
     try {
-      await api.createProductionOrder({ product_id: pick.id, qty: Number(qty) || 1 });
+      await createOrder.mutateAsync({ product_id: pick.id, qty: Number(qty) || 1 });
       setShowCreate(false);
       setPick(null);
-      await refreshList();
     } catch (e) {
-      setError(messageOf(e, 'Could not create the order'));
-    } finally {
-      setBusy(false);
+      setLocalError(messageOf(e, 'Could not create the order'));
     }
-  }, [pick, qty]);
+  }, [pick, qty, createOrder]);
 
+  const setStatus = useSetProductionStatus({
+    onError: (e) => setLocalError(messageOf(e, 'Action failed')),
+  });
+
+  // The hooks invalidate the order list on success, so no manual refresh here.
   const run = useCallback(
     async (fn: () => Promise<unknown>) => {
-      setBusy(true);
-      setError(null);
+      setLocalError(null);
       try {
         await fn();
-        await refreshList();
       } catch (e) {
-        setError(messageOf(e, 'Action failed'));
-      } finally {
-        setBusy(false);
+        setLocalError(messageOf(e, 'Action failed'));
       }
     },
     [],
@@ -127,10 +115,14 @@ export default function ProductionScreen() {
   if (!canView) return <AccessDenied module="Production" />;
   if (loading) return <ScreenSkeleton label="Loading production" rows={5} />;
 
+  const errorMessage = localError ?? (fetchError ? messageOf(fetchError) : null);
+
   return (
     <View style={styles.screen}>
       <View style={styles.bannerWrap}>
-        {error ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
+        {errorMessage ? (
+          <ErrorBanner message={errorMessage} onRetry={() => void refresh()} />
+        ) : null}
       </View>
 
       {canCreate ? (
@@ -152,10 +144,7 @@ export default function ProductionScreen() {
           <RefreshControl
             refreshing={refreshing}
             tintColor={colors.primary}
-            onRefresh={() => {
-              setRefreshing(true);
-              void load();
-            }}
+            onRefresh={() => void refresh()}
           />
         }
         ListHeaderComponent={
@@ -163,7 +152,7 @@ export default function ProductionScreen() {
             <Card level={2} style={styles.planner}>
               <SectionHeader label="Select product" />
               <View style={styles.prodList}>
-                {products.slice(0, 12).map((p) => (
+                {products.slice(0, 12).map((p: CatalogProduct) => (
                   <OptionRow
                     key={p.id}
                     label={p.name}
@@ -204,11 +193,13 @@ export default function ProductionScreen() {
             hint={canCreate ? 'Create one to start the production spine.' : 'Nothing scheduled for you yet.'}
           />
         }
-        renderItem={({ item }) => {
+        renderItem={({ item }: { item: ProductionOrder }) => {
           const tone = STATUS_COLOR[item.status] ?? colors.muted;
           const stageIdx = STAGES.indexOf(item.status as (typeof STAGES)[number]);
           const pending = item.lines.reduce((a, l) => a + l.pending, 0);
-          const allowed = item.valid_transitions ?? [];
+          const allowed = (item.valid_transitions ?? []).filter((t) =>
+            canGrant(user, t.required_permission),
+          );
           return (
             <Card style={styles.card}>
               <View style={styles.top}>
@@ -244,22 +235,21 @@ export default function ProductionScreen() {
 
               {canEdit && allowed.length > 0 ? (
                 <View style={styles.btnRow}>
-                  {allowed.map((nextStatus) => {
-                    const label = STAGE_LABEL[nextStatus] ?? nextStatus;
+                  {allowed.map((t) => {
+                    const label = t.label ?? STAGE_LABEL[t.target_status] ?? t.target_status;
                     let variant: 'primary' | 'success' | 'danger' | 'secondary' = 'primary';
-                    if (nextStatus === 'cancelled') variant = 'danger';
-                    else if (nextStatus === 'in_production') variant = 'success';
-                    else if (nextStatus === 'dispatched') variant = 'success';
-                    else if (nextStatus === 'on_hold') variant = 'secondary';
+                    if (t.action === 'cancel') variant = 'danger';
+                    else if (t.target_status === 'in_production' || t.target_status === 'dispatched') variant = 'success';
+                    else if (t.target_status === 'on_hold') variant = 'secondary';
                     return (
                       <Button
-                        key={nextStatus}
+                        key={t.target_status}
                         label={label}
                         variant={variant}
                         compact
                         style={styles.flex}
-                        disabled={busy}
-                        onPress={() => void run(() => api.setProductionStatus(item.id, nextStatus))}
+                        loading={setStatus.isPending && setStatus.variables?.id === item.id}
+                        onPress={() => void run(() => setStatus.mutateAsync({ id: item.id, status: t.target_status }))}
                       />
                     );
                   })}

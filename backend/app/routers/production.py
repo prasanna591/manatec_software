@@ -45,7 +45,11 @@ def order_detail(order_id: int, db: Session = Depends(get_db),
 def valid_transitions(order_id: int, db: Session = Depends(get_db),
                       _: User = Depends(requires("Production", "view"))):
     order = _order_404(db, order_id)
-    return {"current": order.status, "allowed": production_service.get_valid_transitions(order.status)}
+    return {
+        "current": order.status,
+        "status": order.status,
+        "valid_transitions": production_service.get_valid_transitions(order.status),
+    }
 
 
 @router.post("/orders", status_code=201)
