@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import {
   api,
   ApiError,
+  getRefreshToken,
   setAccessToken,
   setRefreshToken,
   setTokenRefreshHandler,
@@ -33,6 +34,8 @@ interface AuthContextValue {
   authError: string | null;
   signIn: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  /** Revoke every session on all devices, then clear locally (AGENT.md §3). */
+  signOutAll: () => Promise<void>;
   reconnect: () => Promise<void>;
   can: (module: string, action: Action) => boolean;
   hasModule: (module: string) => boolean;
@@ -119,6 +122,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    // Revoke server-side first (rotating sessions means the token in hand is
+    // one-time); a failure still clears the local session.
+    await api.logout(getRefreshToken());
+    await clearSession();
+    setUser(null);
+    setAuthError(null);
+  }, []);
+
+  const signOutAll = useCallback(async () => {
+    try {
+      await api.logoutAll();
+    } catch {
+      // token may already be dead; local clear below is the important part
+    }
     await clearSession();
     setUser(null);
     setAuthError(null);
@@ -154,13 +171,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       authError,
       signIn,
       signOut,
+      signOutAll,
       reconnect: bootstrap,
       invalidate,
       can: (module, action) => canPerm(user, module, action),
       hasModule: (module) => hasModulePerm(user, module),
       canAny: (module) => anyAction(user, module),
     }),
-    [user, initializing, signingIn, authError, signIn, signOut, bootstrap, invalidate],
+    [user, initializing, signingIn, authError, signIn, signOut, signOutAll, bootstrap, invalidate],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

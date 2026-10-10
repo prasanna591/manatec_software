@@ -226,8 +226,6 @@ export const DonutChart = memo(function DonutChart({
     };
   }, { cumulative: -Math.PI / 2, paths: [] as React.ReactElement[] }).paths;
 
-  const centerValue = total.toLocaleString();
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
       <svg
@@ -266,7 +264,7 @@ export const DonutChart = memo(function DonutChart({
           role="list"
           aria-label="Chart legend"
         >
-          {data.map((d, i) => (
+          {data.map((d) => (
             <div
               key={d.label}
               style={{
@@ -418,7 +416,6 @@ export const LineChart = memo(function LineChart({
             style={{
               transformOrigin: `${leftPad}px ${topPad + chartHeight}px`,
               transform: animate ? 'scaleY(0)' : 'scaleY(1)',
-              transformOrigin: 'bottom',
               transition: animate ? 'transform 0.8s cubic-bezier(0.16, 1, 0.3, 1)' : 'none',
             }}
           />

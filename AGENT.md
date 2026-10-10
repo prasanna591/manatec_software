@@ -38,10 +38,12 @@ spec-first, then API, then UI.
 - UI rule: gate controls on `permissions.includes("Module:action")`,
   **never** on `user.role === "ADMIN"` (ADMIN bypass lives server-side
   only). Every gated control must name the missing right when hidden.
-  `[PARTIAL]` — SERVICES gating uses `can()`; there are no role-branch
-  screens left, but `isInRole` still appears in some row/footer copy paths
-  to sweep (HomeScreen "Plant pulse" label uses `Dashboard:export`
-  instead of ADMIN/MGMT/DH role check for now).
+  `[DONE]` — the last role check was the `user.role === "ADMIN"` bypass in
+  `mobile/src/auth/permissions.ts::can/hasModule`; removed. The client now
+  relies on the complete grant list the server returns (ADMIN is seeded
+  every `Module:action`; enforced by a test). Web `AppShell.has()` was
+  already permission-only. Backend `requires()` keeps the ADMIN bypass
+  server-side as specified.
 - Server independently authenticates → authorizes → validates state →
   executes in a transaction on every mutation. UI gating is presentation
   only. `[DONE]` (routers enforce per-endpoint).
@@ -51,14 +53,20 @@ spec-first, then API, then UI.
 
 ## 3. Auth & session security
 
-- Target: access token **15–30 min**, refresh **7–14 days**, auto-refresh
-  with 120 s leeway. `[TODO]` — current: 8 h access (`config.py`
-  `token_expire_hours`), 14 d refresh. Shorten before production.
+- Access token **30 min** (`config.py` `access_token_minutes`, 15–30 target),
+  refresh **14 days**, auto-refresh with 120 s leeway. `[DONE]` — endpoints
+  stay configurable; flip to 15 min via env before production.
 - Refresh-token **rotation + revocation + device/session list + "logout
-  all devices"**. `[TODO]`
+  all devices"**. `[DONE]` — `RefreshSession` stores only a SHA-256 hash per
+  `jti` (`app/sessions.py`); every refresh rotates (retires the old row),
+  replay of a retired token is treated as theft and revokes the family, and
+  `GET /auth/sessions`, `DELETE /auth/sessions/{id}`, `POST /auth/logout`,
+  `POST /auth/logout-all` expose the lifecycle. Both clients persist the
+  rotated refresh token; mobile shows devices in Profile.
 - Single-flight refresh (one in-flight refresh shared by all 401s, then
-  retry) is `[DONE]` in `mobile/src/api/client.ts` (`refreshInFlight`) —
-  keep this invariant in any rewrite.
+  retry) is `[DONE]` in `mobile/src/api/client.ts` (`refreshInFlight`) and
+  now also in `web/src/api/client.ts` — keep this invariant in any rewrite.
+  Refresh tokens are `type: "refresh"` and are rejected as access tokens.
 - Sign-out clears SecureStore/localStorage. Demo accounts (`admin/admin123`
   etc.) render only under `__DEV__` `[DONE]` — and `seed_demo` must be
   false in any staging/prod database `[TODO: enforce via env]`.

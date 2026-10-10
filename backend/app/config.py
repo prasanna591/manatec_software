@@ -12,7 +12,8 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./manatec.db"
     jwt_secret: str = os.getenv("JWT_SECRET", "dev-secret-change-me")
     jwt_algorithm: str = "HS256"
-    token_expire_hours: int = 8          # FRS 5.3 access token
+    # AGENT.md §3: access 15-30 min, refreshed ~120 s early by clients.
+    access_token_minutes: int = 30
     refresh_expire_days: int = 14        # FRS 5.3 refresh token
     mock_erp_items: int = 54             # size of mock ERP catalogue (real captured components)
     sync_interval_minutes: int = 15      # FRS 18.5 stock default

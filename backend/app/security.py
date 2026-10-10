@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -28,36 +30,55 @@ def verify_password(raw: str, hashed: str) -> bool:
         return False
 
 
-def _token(user: User, minutes: int) -> str:
+def _token(user: User, minutes: int, token_type: str, jti: str | None = None) -> str:
     cfg = get_settings()
+    now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user.id),
         "username": user.username,
         "role": user.role.code,
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=minutes),
-        "type": "access",
+        "iat": now,
+        "exp": now + timedelta(minutes=minutes),
+        "type": token_type,
+        "jti": jti or uuid.uuid4().hex,
     }
     return jwt.encode(payload, cfg.jwt_secret, algorithm=cfg.jwt_algorithm)
 
 
+def new_jti() -> str:
+    return uuid.uuid4().hex
+
+
 def create_access_token(user: User) -> str:
-    return _token(user, get_settings().token_expire_hours * 60)
+    """Short-lived bearer token (AGENT.md §3: 15-30 min)."""
+    return _token(user, get_settings().access_token_minutes, "access")
 
 
-def create_refresh_token(user: User) -> str:
-    return _token(user, get_settings().refresh_expire_days * 24 * 60)
+def create_refresh_token(user: User, jti: str) -> str:
+    """Long-lived refresh token bound to a ``RefreshSession`` row by ``jti``."""
+    return _token(user, get_settings().refresh_expire_days * 24 * 60, "refresh", jti)
 
 
-def decode_token(token: str) -> dict:
+def hash_token(token: str) -> str:
+    """SHA-256 hex digest of a token — what we persist, never the token itself."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def decode_token(token: str, expected_type: str | None = None) -> dict:
     cfg = get_settings()
     try:
-        return jwt.decode(token, cfg.jwt_secret, algorithms=[cfg.jwt_algorithm])
+        payload = jwt.decode(token, cfg.jwt_secret, algorithms=[cfg.jwt_algorithm])
     except jwt.PyJWTError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
+    if expected_type and payload.get("type") != expected_type:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Wrong token type")
+    return payload
 
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
-    payload = decode_token(token)
+    # Only access tokens authenticate requests; a refresh token presented as a
+    # bearer must not act as an access token.
+    payload = decode_token(token, expected_type="access")
     user = db.get(User, int(payload["sub"]))
     if not user or not user.active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User inactive or missing")

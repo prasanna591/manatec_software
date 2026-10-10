@@ -408,3 +408,82 @@ collapses to an instant state swap. No decorative animation was added.
 - Contrast validator over the parsed palette — 31/31 pairs pass.
 - `24/24` inline `Pressable`s labelled; `0` em-dashes in UI source.
 - Backend untouched, so `python -m pytest -q` (22 passed) still applies.
+
+## Step 6.8 — Token lifetimes + refresh rotation/revocation (Phase 1, item 1)
+
+First Phase 1 (P0 foundations) item from `AGENT.md` §14. Before this, the
+access token lived 8 h and the refresh token was a stateless JWT that could
+never be revoked; the spec requires 15–30 min access, rotation, revocation,
+a device/session list and "logout all devices".
+
+### Backend
+
+- **`config.py`** — `token_expire_hours: 8` → `access_token_minutes: 30`
+  (within the 15–30 AGENT.md target).
+- **`models.py`** — new `RefreshSession` table: `jti` (unique), SHA-256
+  `token_hash` (the token itself is never stored), `device`, `user_agent`,
+  `ip`, `created_at`, `last_used_at`, `expires_at`, `revoked_at`,
+  `revoked_reason`, `replaced_by_jti`.
+- **`security.py`** — tokens now carry `jti`/`iat`/`type`; access is created
+  from `access_token_minutes`; added `hash_token()` and
+  `decode_token(expected_type=...)`. **`get_current_user` rejects a refresh
+  token presented as a bearer.**
+- **`app/sessions.py`** (new) — `issue_session`, `rotate_session`,
+  `revoke_all`, `revoke_by_token`, `revoke_session`, `list_sessions`.
+  Rotation retires the presented row and mints a new one. **Reuse detection:**
+  presenting an already-retired/rotated token revokes the whole family.
+- **`routers/auth.py`** — login issues a session; refresh returns a **new
+  access + refresh pair**; added `GET /auth/sessions`,
+  `DELETE /auth/sessions/{id}`, `POST /auth/logout`,
+  `POST /auth/logout-all`; login/logout are audited.
+
+### Clients (rotation is only safe if both persist the new refresh token)
+
+- **mobile** `api/client.ts` — refresh reads and stores the rotated
+  `refresh_token`; added `sessions`, `logout`, `logoutAll`. `AuthContext`
+  revokes server-side on `signOut` and exposes `signOutAll`; ProfileScreen
+  lists active devices and offers "Sign out of all devices".
+- **web** — implemented silent refresh that was entirely missing (a 30 min
+  access token would otherwise drop the session every half hour):
+  single-flight `refreshAccessToken`, proactive renewal from the JWT `exp`,
+  reactive retry once on 401, rotated-token persistence, global unauthorized
+  handler, and server-side logout. `AuthContext` persists the refresh token.
+- Fixed three pre-existing `tsc` errors in the unused
+  `web/src/components/charts/Charts.tsx` (unused var/param, duplicate key)
+  that were blocking `npm run build`.
+
+### Verified
+
+- `pytest` → **32 passed** (27 prior + 5 new: rotation + reuse detection,
+  refresh-token-as-access rejected, session list + logout-all, single logout,
+  short-lifetime assertion).
+- Table auto-migrates onto the existing dev SQLite DB via `_add_missing_columns`.
+- `mobile && npx tsc --noEmit` → clean.
+- `web && npm run build` → clean; `npm run lint` → no new errors.
+
+## Step 6.9 — Remove the last client role gate (Phase 1, item 2)
+
+`AGENT.md` §2 requires UI gating on `Module:action` grants, never on
+`user.role === "ADMIN"` (the ADMIN bypass is meant to live server-side only).
+
+A full sweep for `isInRole` / role comparisons across `mobile/`, `web/` and
+`backend/` found the migration already complete **except** the client-side
+ADMIN bypass in `mobile/src/auth/permissions.ts::can()` and `hasModule()`.
+Web `AppShell.has()` was already permission-only; backend `requires()` keeps
+the ADMIN bypass deliberately.
+
+- Removed both `if (user.role === 'ADMIN') return true;` shortcuts, with a
+  comment explaining that the server seeds every permission for ADMIN, so the
+  grant list is complete and the client can stay role-free. The only remaining
+  `user.role` reads are display/cosmetic (`accentFor`, role labels).
+- Added `test_admin_grants_cover_every_module_for_role_free_client_gating`:
+  asserts ADMIN's `/auth/me` permissions cover all six actions for every
+  module in the seeded matrix — the invariant that makes the role-free client
+  check safe.
+
+### Verified
+
+- `pytest` → **33 passed** (added the admin-grant-coverage test).
+- `mobile && npx tsc --noEmit` → clean.
+
+

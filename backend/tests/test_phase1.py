@@ -282,3 +282,97 @@ def test_valid_transitions_are_objects_with_permission():
             if t:
                 first = t["valid_transitions"][0]
                 assert set(first) == {"action", "label", "target_status", "required_permission"}
+
+
+# --- AGENT.md §3 · token lifetime, rotation, revocation ---------------------
+
+
+def test_refresh_rotates_and_detects_reuse():
+    with TestClient(app) as client:
+        auth = _login(client, "manager", "demo123")
+        old_refresh = auth["refresh_token"]
+
+        rotated = client.post("/api/v1/auth/refresh", json={"refresh_token": old_refresh})
+        assert rotated.status_code == 200, rotated.text
+        body = rotated.json()
+        assert body["access_token"] and body["refresh_token"]
+        assert body["refresh_token"] != old_refresh
+
+        # Replaying the retired token is theft: 401 and the whole family dies.
+        reuse = client.post("/api/v1/auth/refresh", json={"refresh_token": old_refresh})
+        assert reuse.status_code == 401, reuse.text
+
+        # The newly issued token was revoked by reuse detection too.
+        after = client.post("/api/v1/auth/refresh", json={"refresh_token": body["refresh_token"]})
+        assert after.status_code == 401, after.text
+
+
+def test_refresh_token_cannot_authenticate_as_access():
+    with TestClient(app) as client:
+        auth = _login(client, "manager", "demo123")
+        r = client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {auth['refresh_token']}"},
+        )
+        assert r.status_code == 401, r.text
+
+
+def test_sessions_list_and_logout_all():
+    with TestClient(app) as client:
+        first = _login(client, "manager", "demo123")
+        second = _login(client, "manager", "demo123")
+
+        h = {"Authorization": f"Bearer {second['access_token']}"}
+        listed = client.get("/api/v1/auth/sessions", headers=h)
+        assert listed.status_code == 200, listed.text
+        active = [s for s in listed.json()["items"] if s["active"]]
+        assert len(active) >= 2
+        assert all("created_at" in s and "expires_at" in s for s in active)
+
+        out = client.post("/api/v1/auth/logout-all", headers=h)
+        assert out.status_code == 200, out.text
+        assert out.json()["revoked"] >= 2
+
+        for token in (first["refresh_token"], second["refresh_token"]):
+            assert client.post("/api/v1/auth/refresh", json={"refresh_token": token}).status_code == 401
+
+
+def test_logout_revokes_single_session():
+    with TestClient(app) as client:
+        auth = _login(client, "manager", "demo123")
+        out = client.post("/api/v1/auth/logout", json={"refresh_token": auth["refresh_token"]})
+        assert out.status_code == 200, out.text
+        again = client.post("/api/v1/auth/refresh", json={"refresh_token": auth["refresh_token"]})
+        assert again.status_code == 401, again.text
+
+
+def test_access_token_lifetime_is_short():
+    """AGENT.md §3: access 15-30 min, not the old 8 h."""
+    import jwt
+
+    from app.config import get_settings
+
+    with TestClient(app) as client:
+        auth = _login(client, "manager", "demo123")
+        cfg = get_settings()
+        claims = jwt.decode(auth["access_token"], cfg.jwt_secret, algorithms=[cfg.jwt_algorithm])
+        assert claims["type"] == "access"
+        assert claims["exp"] - claims["iat"] == cfg.access_token_minutes * 60
+        assert cfg.access_token_minutes <= 30
+
+
+def test_admin_grants_cover_every_module_for_role_free_client_gating():
+    """AGENT.md §2: clients gate on `Module:action`, never on `user.role`.
+
+    The mobile `can()`/`hasModule()` no longer special-case ADMIN, so the
+    server-returned grant list for ADMIN must itself be complete — otherwise
+    removing the bypass would hide controls the API would still allow.
+    """
+    from app.seed import ACTION, _MATRIX
+
+    with TestClient(app) as client:
+        perms = set(_login(client, "admin", "admin123")["user"]["permissions"])
+        expected_actions = {ACTION[letter] for letter in "RCEAXD"}
+        for module in _MATRIX:
+            for action in expected_actions:
+                assert f"{module}:{action}" in perms, f"admin missing {module}:{action}"

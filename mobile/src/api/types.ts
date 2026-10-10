@@ -32,6 +32,20 @@ export interface LoginResponse {
   user: UserProfile;
 }
 
+/** A device/session row from `GET /auth/sessions` (AGENT.md §3). */
+export interface SessionInfo {
+  id: number;
+  device: string | null;
+  user_agent: string | null;
+  ip: string | null;
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string;
+  active: boolean;
+  revoked_at: string | null;
+  revoked_reason: string | null;
+}
+
 export interface DashboardKpis {
   orders: number;
   orders_open: number;

@@ -26,6 +26,7 @@ import type {
   Role,
   RolePermissions,
   SearchResponse,
+  SessionInfo,
   StockAlert,
   StockRow,
   Supplier,
@@ -45,14 +46,86 @@ export class ApiError extends Error {
 }
 
 let accessToken: string | null = null;
+let refreshToken: string | null = null;
+let onUnauthorized: (() => void) | null = null;
+let onTokensRefreshed: ((access: string, refresh: string) => void) | null = null;
+let refreshInFlight: Promise<boolean> | null = null;
 
 export function setAccessToken(token: string | null): void {
   accessToken = token;
 }
 
+export function setRefreshToken(token: string | null): void {
+  refreshToken = token;
+}
+
+export function getRefreshToken(): string | null {
+  return refreshToken;
+}
+
+/** Registered by AuthProvider so any dead session drops to login exactly once. */
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
+}
+
+/** Registered by AuthProvider so rotated tokens reach localStorage. */
+export function setTokenRefreshHandler(
+  handler: ((access: string, refresh: string) => void) | null,
+): void {
+  onTokensRefreshed = handler;
+}
+
+/** Seconds until a JWT expires; Infinity when unreadable. */
+function secondsUntilExpiry(token: string): number {
+  const parts = token.split('.');
+  if (parts.length !== 3) return Infinity;
+  try {
+    const claims = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+    if (typeof claims?.exp !== 'number') return Infinity;
+    return claims.exp - Math.floor(Date.now() / 1000);
+  } catch {
+    return Infinity;
+  }
+}
+
+const REFRESH_LEEWAY_SECONDS = 120;
+
+/**
+ * Single-flight access-token renewal. The backend rotates the refresh token on
+ * every call, so the returned pair must be persisted or the next refresh trips
+ * reuse detection. A failure is not retried here.
+ */
+async function refreshAccessToken(): Promise<boolean> {
+  if (!refreshToken) return false;
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+        if (!res.ok) return false;
+        const body = (await res.json()) as { access_token?: string; refresh_token?: string };
+        if (!body.access_token) return false;
+        accessToken = body.access_token;
+        if (body.refresh_token) refreshToken = body.refresh_token;
+        onTokensRefreshed?.(body.access_token, refreshToken as string);
+        return true;
+      } catch {
+        return false;
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+  }
+  return refreshInFlight;
+}
+
 async function parseError(res: Response): Promise<string> {
   try {
     const body = await res.json();
+    if (typeof body?.error?.message === 'string' && body.error.message) return body.error.message;
     if (typeof body?.detail === 'string') return body.detail;
     if (Array.isArray(body?.detail)) return body.detail[0]?.msg ?? res.statusText;
   } catch {
@@ -61,7 +134,11 @@ async function parseError(res: Response): Promise<string> {
   return res.statusText || `HTTP ${res.status}`;
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}, isRetry = false): Promise<T> {
+  if (!isRetry && accessToken && secondsUntilExpiry(accessToken) <= REFRESH_LEEWAY_SECONDS) {
+    await refreshAccessToken();
+  }
+
   const headers: Record<string, string> = {
     Accept: 'application/json',
     ...(init.headers as Record<string, string> | undefined),
@@ -75,7 +152,14 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   } catch {
     throw new ApiError(0, `Cannot reach the server at ${API_BASE}`);
   }
-  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+
+  if (res.status === 401 && !isRetry && refreshToken) {
+    if (await refreshAccessToken()) return request<T>(path, init, true);
+  }
+  if (!res.ok) {
+    if (res.status === 401 && onUnauthorized) onUnauthorized();
+    throw new ApiError(res.status, await parseError(res));
+  }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
@@ -120,6 +204,26 @@ export const api = {
   },
 
   me: () => request<UserProfile>('/auth/me'),
+
+  sessions: () => request<{ items: SessionInfo[] }>('/auth/sessions'),
+
+  /** Revoke the current session server-side; local clear happens anyway. */
+  async logout(refresh?: string | null): Promise<void> {
+    try {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
+        body: JSON.stringify({ refresh_token: refresh ?? refreshToken ?? '' }),
+      });
+    } catch {
+      // ignore — session is cleared locally regardless
+    }
+  },
+
+  logoutAll: () => request<{ ok: boolean; revoked: number }>('/auth/logout-all', { method: 'POST' }),
 
   dashboardOverview: () =>
     request<{ kpis: DashboardKpis }>('/dashboard/overview').then((r) => r.kpis),

@@ -22,7 +22,7 @@ function resolveApiBase(): string {
   const override = process.env.EXPO_PUBLIC_API_URL;
   if (override) return override.replace(/\/$/, '');
 
-  if (Platform.OS === 'web') return 'http://localhost:8099/api/v1';
+  if (Platform.OS === 'web') return 'http://localhost:8000/api/v1';
 
   const host =
     hostFromUri(Constants.expoConfig?.hostUri) ??
@@ -30,17 +30,17 @@ function resolveApiBase(): string {
     hostFromUri(Constants.linkingUri) ??
     hostFromUri(Constants.experienceUrl);
 
-  if (host) return `http://${host}:8099/api/v1`;
+  if (host) return `http://${host}:8000/api/v1`;
 
   if (__DEV__) {
     console.warn(
       '[config] Could not derive the dev host from Metro. API requests will go to ' +
         '127.0.0.1 and will fail on a physical device. Start the dev server with ' +
-        '`npx expo start --host lan` or set EXPO_PUBLIC_API_URL=http://<your-lan-ip>:8099/api/v1',
+        '`npx expo start --host lan` or set EXPO_PUBLIC_API_URL=http://<your-lan-ip>:8000/api/v1',
     );
   }
 
-  return 'http://127.0.0.1:8099/api/v1';
+  return 'http://127.0.0.1:8000/api/v1';
 }
 
 export const API_BASE = resolveApiBase();

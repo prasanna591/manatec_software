@@ -51,9 +51,15 @@ export const MODULES = [
 
 export type Module = (typeof MODULES)[number];
 
+/**
+ * Pure permission check (AGENT.md §2): gate on the `Module:action` grants the
+ * server returns, never on `user.role`. ADMIN is not special-cased here — the
+ * backend seeds every permission for ADMIN and `requires()` enforces the same
+ * bypass server-side, so the grant list is already complete. Keeping the check
+ * role-free means the UI can never claim a right the API would deny.
+ */
 export function can(user: UserProfile | null, module: string, action: Action): boolean {
   if (!user) return false;
-  if (user.role === 'ADMIN') return true;
   const key = `${module}:${action}`;
   return user.permissions.some((p) => {
     const [m, a] = p.split(':');
@@ -70,7 +76,6 @@ export function canGrant(user: UserProfile | null, grant: string): boolean {
 
 export function hasModule(user: UserProfile | null, module: string): boolean {
   if (!user) return false;
-  if (user.role === 'ADMIN') return true;
   const prefix = `${module}:`;
   return user.permissions.some((p) => p.startsWith(prefix));
 }

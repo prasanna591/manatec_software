@@ -1,14 +1,25 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
+import { api } from '../api/client';
+import type { SessionInfo } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { ACTIONS } from '../auth/permissions';
 import { Button, Card, Divider, KeyValue, Monogram, SectionHeader } from '../components/ui';
-import { colors, NOT_SET, radius, spacing, typography, withAlpha } from '../theme';
+import {
+  colors,
+  formatDateTime,
+  NOT_SET,
+  radius,
+  spacing,
+  typography,
+  withAlpha,
+} from '../theme';
 
 export default function ProfileScreen() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, signOutAll } = useAuth();
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
 
   /** Group the flat "Module:action" grants by module so access is readable. */
   const grouped = useMemo(() => {
@@ -22,6 +33,22 @@ export default function ProfileScreen() {
     }
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [user?.permissions]);
+
+  // Device/session list (AGENT.md §3). Best-effort: never blocks the screen.
+  useEffect(() => {
+    let alive = true;
+    api
+      .sessions()
+      .then((r) => {
+        if (alive) setSessions(r.items.filter((s) => s.active));
+      })
+      .catch(() => {
+        if (alive) setSessions([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [user?.id]);
 
   if (!user) return null;
 
@@ -85,12 +112,44 @@ export default function ProfileScreen() {
         Access is enforced by the server. Hiding a control never grants a permission.
       </Text>
 
+      <SectionHeader label={`Active devices (${sessions.length})`} />
+      <Card style={styles.card}>
+        {sessions.length === 0 ? (
+          <Text style={styles.sessionEmpty}>No active sessions listed.</Text>
+        ) : (
+          sessions.map((s, i) => (
+            <View key={s.id}>
+              {i > 0 ? <Divider /> : null}
+              <View style={styles.sessionRow}>
+                <Ionicons name="phone-portrait-outline" size={16} color={colors.muted} />
+                <View style={styles.sessionText}>
+                  <Text style={styles.sessionTitle} numberOfLines={1}>
+                    {s.device || s.user_agent || 'Unknown device'}
+                  </Text>
+                  <Text style={styles.sessionMeta} numberOfLines={1}>
+                    {s.ip ? `${s.ip} · ` : ''}
+                    {s.last_used_at ? `last used ${formatDateTime(s.last_used_at)}` : 'current'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          ))
+        )}
+      </Card>
+
       <Button
         label="Sign out"
         variant="danger"
         icon={<Ionicons name="log-out-outline" size={17} color="#ffffff" />}
         onPress={() => void signOut()}
         style={styles.signOut}
+      />
+      <Button
+        label="Sign out of all devices"
+        variant="secondary"
+        icon={<Ionicons name="log-out-outline" size={17} color={colors.text} />}
+        onPress={() => void signOutAll()}
+        style={styles.signOutAll}
       />
     </ScrollView>
   );
@@ -125,5 +184,11 @@ const styles = StyleSheet.create({
   },
   actionChipText: { fontSize: 11, color: colors.primaryDark, fontWeight: '700' },
   footnote: { ...typography.caption, textAlign: 'center', marginTop: spacing.sm },
+  sessionRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
+  sessionText: { flex: 1 },
+  sessionTitle: { ...typography.body, fontWeight: '600' },
+  sessionMeta: { ...typography.caption, marginTop: 2 },
+  sessionEmpty: { ...typography.bodyMuted, paddingVertical: spacing.sm },
   signOut: { marginTop: spacing.lg },
+  signOutAll: { marginTop: spacing.sm },
 });

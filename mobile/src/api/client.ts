@@ -33,6 +33,7 @@ import type {
   Quote,
   Roster,
   SearchResponse,
+  SessionInfo,
   StockBalance,
   StockResponse,
   Task,
@@ -128,6 +129,10 @@ export function getAccessToken(): string | null {
   return accessToken;
 }
 
+export function getRefreshToken(): string | null {
+  return refreshToken;
+}
+
 /** Registered by AuthProvider so any 401 drops the session exactly once. */
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
   onUnauthorized = handler;
@@ -175,9 +180,11 @@ function secondsUntilExpiry(token: string): number {
 }
 
 /**
- * Swap the 8 h access token for a fresh one using the 14 d refresh token
- * (backend `POST /auth/refresh`). Concurrent callers share one request, and a
- * failure is not retried, so a dead refresh token cannot loop.
+ * Swap the short-lived access token for a fresh pair using the refresh token
+ * (backend `POST /auth/refresh`). The server **rotates** the refresh token on
+ * every call, so the new one must be persisted or the next refresh presents a
+ * retired token and trips reuse detection. Concurrent callers share one
+ * request, and a failure is not retried, so a dead refresh token cannot loop.
  */
 async function refreshAccessToken(): Promise<boolean> {
   if (!refreshToken) return false;
@@ -190,9 +197,10 @@ async function refreshAccessToken(): Promise<boolean> {
           body: JSON.stringify({ refresh_token: refreshToken }),
         });
         if (!res.ok) return false;
-        const body = (await res.json()) as { access_token?: string };
+        const body = (await res.json()) as { access_token?: string; refresh_token?: string };
         if (!body.access_token) return false;
         accessToken = body.access_token;
+        if (body.refresh_token) refreshToken = body.refresh_token;
         onTokensRefreshed?.(body.access_token, refreshToken as string);
         return true;
       } catch {
@@ -299,6 +307,31 @@ export const api = {
   },
 
   me: () => request<UserProfile>('/auth/me'),
+
+  /** Device/session list for the signed-in user. */
+  sessions: () => request<{ items: SessionInfo[] }>('/auth/sessions'),
+
+  /**
+   * Revoke the current session server-side, then the caller clears local
+   * tokens. Best-effort: a network failure must never block sign-out.
+   */
+  async logout(refresh?: string | null): Promise<void> {
+    try {
+      await fetchWithTimeout('/auth/logout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
+        body: JSON.stringify({ refresh_token: refresh ?? refreshToken ?? '' }),
+      });
+    } catch {
+      // ignore — local session is cleared regardless
+    }
+  },
+
+  /** Revoke every session for this user on all devices (AGENT.md §3). */
+  logoutAll: () => request<{ ok: boolean; revoked: number }>('/auth/logout-all', { method: 'POST' }),
 
   dashboardOverview: () => request<DashboardOverview>('/dashboard/overview'),
   dashboardDepartments: () => request<DepartmentStatus[]>('/dashboard/departments'),

@@ -89,6 +89,33 @@ class User(Base):
     role: Mapped[Role] = relationship()
 
 
+class RefreshSession(Base):
+    """One row per issued refresh token (AGENT.md §3).
+
+    Enables refresh-token **rotation** (each refresh mints a new token and
+    retires the old row via ``replaced_by_jti``), **revocation** (single device
+    or every device for a user), and a **device/session list**. Only the
+    SHA-256 hash of the token is stored, so a leaked DB cannot mint tokens.
+    Presenting an already-rotated/revoked token is treated as theft and revokes
+    the whole family (reuse detection), see ``app/sessions.py``.
+    """
+    __tablename__ = "refresh_sessions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    jti: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), index=True)
+    device: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revoked_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    replaced_by_jti: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user: Mapped["User"] = relationship()
+
+
 class ERPObjCache(Base):
     """FRS 4.3 — filtered ERP master references, never the whole ERP DB."""
     __tablename__ = "erp_obj_cache"
